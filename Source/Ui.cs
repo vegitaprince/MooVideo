@@ -32,9 +32,41 @@ sealed class ToolButton:Control
 }
 sealed class OverlayPanel:Panel
 {
-    public OverlayPanel(){BackColor=Theme.Panel;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);}
+    public static readonly Color KeyColor=Color.FromArgb(1,0,1);
+    public OverlayPanel(){BackColor=KeyColor;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);}
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x00080000;return p;}}
-    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SetLayeredWindowAttributes(Handle,0,198,2);}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SetLayeredWindowAttributes(Handle,0x010001,255,1);}
+}
+sealed class ResizeEdge:Control
+{
+    public ResizeEdge(Form owner,int hit){BackColor=Color.Black;TabStop=false;Cursor=hit is 10 or 11?Cursors.SizeWE:hit is 12 or 15?Cursors.SizeNS:hit is 13 or 17?Cursors.SizeNWSE:Cursors.SizeNESW;MouseDown+=(_,e)=>{if(e.Button==MouseButtons.Left){Native.ReleaseCapture();Native.SendMessage(owner.Handle,0xA1,(IntPtr)hit,IntPtr.Zero);}};}
+    protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x80000;return p;}}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SetLayeredWindowAttributes(Handle,0,1,2);}
+}
+// A separate, click-through native layer supplies true per-pixel alpha over mpv's child HWND.
+sealed class GradientShade:Control
+{
+    readonly bool top;
+    public GradientShade(bool top){this.top=top;TabStop=false;Enabled=false;}
+    protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x80020;return p;}}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Render();}
+    protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Render();}
+    internal void Render()
+    {
+        if(!IsHandleCreated||Width<=0||Height<=0)return;
+        using var bitmap=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using(var g=Graphics.FromImage(bitmap))
+        using(var brush=new LinearGradientBrush(new Rectangle(0,0,Width,Height),Color.FromArgb(top?160:0,0,0,0),Color.FromArgb(top?0:190,0,0,0),LinearGradientMode.Vertical))g.FillRectangle(brush,0,0,Width,Height);
+        var dc=CreateCompatibleDC(IntPtr.Zero);var dib=bitmap.GetHbitmap(Color.FromArgb(0));var old=SelectObject(dc,dib);
+        try{var size=new Size(Width,Height);var origin=new Point();var blend=new Blend{Alpha=255,Format=1};if(!UpdateLayeredWindow(Handle,IntPtr.Zero,IntPtr.Zero,ref size,dc,ref origin,0,ref blend,2))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());}
+        finally{SelectObject(dc,old);DeleteObject(dib);DeleteDC(dc);}
+    }
+    [StructLayout(LayoutKind.Sequential,Pack=1)]struct Blend{public byte Operation,Flags,Alpha,Format;}
+    [DllImport("user32.dll",SetLastError=true)]static extern bool UpdateLayeredWindow(IntPtr hwnd,IntPtr dst,IntPtr point,ref Size size,IntPtr src,ref Point origin,uint key,ref Blend blend,uint flags);
+    [DllImport("gdi32.dll")]static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll")]static extern IntPtr SelectObject(IntPtr dc,IntPtr obj);
+    [DllImport("gdi32.dll")]static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")]static extern bool DeleteDC(IntPtr dc);
 }
 sealed class VolumeSlider:Control
 {

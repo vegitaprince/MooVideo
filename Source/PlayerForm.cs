@@ -12,7 +12,11 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     readonly SeekBar seek=new(); readonly ToolTip tips=new(){BackColor=Theme.Field,ForeColor=Theme.Text,InitialDelay=450};
     readonly System.Windows.Forms.Timer timer=new(){Interval=50},wheelTimer=new(){Interval=240};
     readonly List<ToolButton> leftButtons=new(),rightButtons=new();
-    readonly ToolButton play,volume,speed,loop,playlistButton,folderButton,editButton;
+    readonly ToolButton play,volume,speed,windowSize,loop,playlistButton,folderButton,editButton;
+    readonly GradientShade topShade=new(true),bottomShade=new(false);
+    readonly List<ResizeEdge> edges=new();
+    bool firstVideoSized;
+    DateTime volumeFeedbackUntil=DateTime.MinValue;
     readonly List<string> playlist=new(); Mpv? player; string? current; MediaInfo? info;
     double position,duration,markIn=-1,markOut=-1; int index=-1; bool eofHandled,shuttle,full,shuttleResume,sideOpen; string repeat="off"; Point? videoDown,lastPointer;
     DateTime lastWheel=DateTime.MinValue,lastSave=DateTime.UtcNow,lastPointerMove=DateTime.MinValue,lastVolumeHover=DateTime.MinValue; int wheelBurst,lastDirection;
@@ -21,9 +25,10 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     public PlayerForm(string[] args)
     {
         initialArgs=args; Text="MooVideo";Name="MooVideo";BackColor=Theme.Bg;ForeColor=Theme.Text;Font=Theme.Font();
-        AutoScaleMode=AutoScaleMode.Dpi; FormBorderStyle=FormBorderStyle.None;MinimumSize=new(1030,650);Size=new(1360,840);StartPosition=FormStartPosition.CenterScreen;KeyPreview=true;AllowDrop=true;
+        AutoScaleMode=AutoScaleMode.Dpi; FormBorderStyle=FormBorderStyle.None;MinimumSize=new(320,180);Size=new(1360,840);StartPosition=FormStartPosition.CenterScreen;KeyPreview=true;AllowDrop=true;
         var ico=Path.Combine(AppContext.BaseDirectory,"MooVideo.ico");if(File.Exists(ico))Icon=new Icon(ico);
-        Controls.Add(video); Controls.Add(side); Controls.Add(bottom); Controls.Add(header);Controls.Add(volumePopup);
+        Controls.Add(video);Controls.Add(topShade);Controls.Add(bottomShade); Controls.Add(side); Controls.Add(bottom); Controls.Add(header);Controls.Add(volumePopup);
+        foreach(var hit in new[]{10,11,12,15,13,14,16,17}){var edge=new ResizeEdge(this,hit);edges.Add(edge);Controls.Add(edge);}
         title.AutoEllipsis=true; header.Controls.Add(title);
         var min=Button("\uE921","최소화",()=>WindowState=FormWindowState.Minimized);var max=Button("\uE922","최대화 / 복원",Maximize);var close=Button("\uE8BB","닫기",Close);
         header.Controls.AddRange(new Control[]{min,max,close});
@@ -43,6 +48,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         volumeState.TextAlign=ContentAlignment.MiddleCenter;volumeState.SetBounds(2,4,52,26);volumeSlider.SetBounds(7,32,42,132);
         volumeSlider.ValueChanged+=v=>{if(player==null)return;player.Set("volume",v);player.Set("mute","no");UpdateControls();};
         speed=Button("","재생 속도",ShowSpeed);speed.Text="1×";leftButtons.Add(speed);
+        windowSize=Button("\uE9A6","창 크기 · 원본 / 배율",ShowWindowSizes);leftButtons.Add(windowSize);
         loop=Button("\uE8EE","반복: 끔 / 한 곡 / 목록",CycleRepeat);leftButtons.Add(loop);
         rightButtons.Add(Button("\uE8B9","스크린샷 · S",Screenshot));
         rightButtons.Add(Button("\uE8F2","자막 / 오디오 트랙",ShowTracks));
@@ -52,6 +58,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         rightButtons.Add(Button("\uE946","파일 정보 / 도움말 · I",()=>ToggleSide("info")));
         rightButtons.Add(Button("\uE740","전체화면 · F11",Fullscreen));
         bottom.Controls.AddRange(leftButtons.Concat(rightButtons).Cast<Control>().ToArray());bottom.Controls.AddRange(new Control[]{seek,time,status});
+        foreach(var b in leftButtons.Concat(rightButtons).Concat(header.Controls.OfType<ToolButton>()))b.BackColor=OverlayPanel.KeyColor;
+        seek.BackColor=OverlayPanel.KeyColor;
         seek.Seek+=v=>{player?.Seek(v);eofHandled=false;};
         seek.MarkInChanged+=v=>{markIn=v;if(inBox!=null&&sideMode=="edit")inBox.Value=(decimal)v;};
         seek.MarkOutChanged+=v=>{markOut=v;if(outBox!=null&&sideMode=="edit")outBox.Value=(decimal)v;};
@@ -80,15 +88,22 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     }
     void LayoutPlayer()
     {
-        int bh=88,th=44;int sw=sideOpen&&!full?340:0;video.SetBounds(0,0,ClientSize.Width-sw,ClientSize.Height);
+        bool compact=ClientSize.Width<1050;int bh=compact?112:88,th=44;int sw=sideOpen&&!full?340:0;video.SetBounds(0,0,ClientSize.Width-sw,ClientSize.Height);
         side.SetBounds(full?ClientSize.Width-340:ClientSize.Width-sw,0,full?340:sw,ClientSize.Height-bh);
         bottom.SetBounds(0,ClientSize.Height-bh,ClientSize.Width,bh);header.SetBounds(0,0,ClientSize.Width-sw,th);
-        bottom.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
+        topShade.SetBounds(0,0,video.Width,82);bottomShade.SetBounds(0,ClientSize.Height-bh-40,ClientSize.Width,bh+40);
+        topShade.BringToFront();bottomShade.BringToFront();bottom.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
         seek.SetBounds(14,4,bottom.Width-28,22);int x=14;
-        foreach(var b in leftButtons){b.SetBounds(x,32,b==play?44:36,36);x+=b.Width+5;}
-        int right=bottom.Width-14;foreach(var b in rightButtons.AsEnumerable().Reverse()){right-=36;b.SetBounds(right,32,36,36);right-=5;}
+        foreach(var b in leftButtons){bool show=ClientSize.Width>=600||b==leftButtons[0]||b==play||b==volume||b==speed||b==windowSize;b.Visible=show;if(!show)continue;b.SetBounds(x,32,b==play?44:36,36);x+=b.Width+5;}
+        int right=bottom.Width-14;foreach(var b in rightButtons.AsEnumerable().Reverse()){right-=36;b.SetBounds(right,compact?72:32,36,36);right-=5;}
         time.SetBounds(x+12,28,Math.Max(100,right-x-22),24);status.SetBounds(x+12,52,Math.Max(100,right-x-22),22);
-        volumePopup.SetBounds(volume.Left-10,bottom.Top-142,56,176);
+        time.Visible=true;status.Visible=!compact;
+        if(compact)time.SetBounds(x+8,36,Math.Max(45,bottom.Width-x-22),24);
+        int popupHeight=Math.Min(176,Math.Max(80,bottom.Top+24));
+        volumePopup.SetBounds(volume.Left-10,Math.Max(8,bottom.Top+32-popupHeight),56,popupHeight);
+        volumeSlider.Height=popupHeight-40;
+        int edgeWidth=6;var rects=new[]{new Rectangle(0,edgeWidth,edgeWidth,Height-2*edgeWidth),new Rectangle(Width-edgeWidth,edgeWidth,edgeWidth,Height-2*edgeWidth),new Rectangle(edgeWidth,0,Width-2*edgeWidth,edgeWidth),new Rectangle(edgeWidth,Height-edgeWidth,Width-2*edgeWidth,edgeWidth),new Rectangle(0,0,edgeWidth,edgeWidth),new Rectangle(Width-edgeWidth,0,edgeWidth,edgeWidth),new Rectangle(0,Height-edgeWidth,edgeWidth,edgeWidth),new Rectangle(Width-edgeWidth,Height-edgeWidth,edgeWidth,edgeWidth)};
+        for(int i=0;i<edges.Count;i++){edges[i].Bounds=rects[i];edges[i].Visible=!full&&WindowState==FormWindowState.Normal;edges[i].BringToFront();}
         ResizeSide();UpdateChromeVisibility();
     }
     void UpdateChromeVisibility(Point? pointer=null)
@@ -97,10 +112,11 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         if(lastPointer!=p){lastPointer=p;lastPointerMove=now;}
         bool onVolume=volumePopup.Visible&&volumePopup.Bounds.Contains(p),onButton=bottom.Visible&&volume.Bounds.Contains(bottom.PointToClient(PointToScreen(p)));
         if(onVolume||onButton)lastVolumeHover=now;
-        if(volumePopup.Visible&&!volumeSlider.Dragging&&!onVolume&&!onButton&&(now-lastVolumeHover).TotalMilliseconds>350)volumePopup.Visible=false;
+        if(volumePopup.Visible&&!volumeSlider.Dragging&&!onVolume&&!onButton&&now>volumeFeedbackUntil&&(now-lastVolumeHover).TotalMilliseconds>350)volumePopup.Visible=false;
         bool hold=bottom.Visible&&bottom.Bounds.Contains(p)||sideOpen&&side.Visible&&side.Bounds.Contains(p)||volumePopup.Visible&&onVolume;
         bool visible=inside&&(!full||(now-lastPointerMove).TotalSeconds<2.2||hold);
         bottom.Visible=visible;header.Visible=visible&&!full;side.Visible=sideOpen&&(!full||visible);
+        bottomShade.Visible=visible;topShade.Visible=visible&&!full;
         if(!visible)volumePopup.Visible=false;
     }
     void ShowVolumeFlyout(){if(!bottom.Visible)return;lastVolumeHover=DateTime.UtcNow;volumePopup.Visible=true;volumePopup.BringToFront();}
@@ -110,8 +126,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         // mpv creates a child HWND on its render thread. Disabling only its input routes mouse/drop to our parent, while video rendering remains active.
         Native.EnumChildWindows(video.Handle,(h,_)=>{Native.EnableWindow(h,false);return true;},IntPtr.Zero);
         position=player.Number("time-pos");duration=player.Number("duration");
-        if(!seek.Dragging){seek.Value=position;seek.Duration=duration;seek.MarkIn=markIn;seek.MarkOut=markOut;seek.Invalidate();}
-        time.Text=$"{Clock(position)} / {Clock(duration)}";UpdateControls();
+        if(!seek.Dragging){seek.Value=position;seek.Duration=duration;SyncEditMarkers();}
+        time.Text=ClientSize.Width<600?Clock(position):$"{Clock(position)} / {Clock(duration)}";UpdateControls();
         if(current!=null&&!shuttle&&player.Flag("eof-reached")&&!eofHandled){eofHandled=true;if(repeat=="one"){player.Seek(0);player.Set("pause","no");eofHandled=false;}else if(index+1<playlist.Count||repeat=="all")Next(1);}
         if((DateTime.UtcNow-lastSave).TotalSeconds>15){Remember();prefs.Save();lastSave=DateTime.UtcNow;}
     }
@@ -122,6 +138,21 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         eofHandled=false;video.Empty=false;video.Invalidate();player?.Set("pause","no");player?.Set("speed",1);
         if(current!=null&&prefs.Positions.TryGetValue(current,out var p)&&p>3&&p<player!.Number("duration")-3)player.Seek(p);
         status.Text="재생 중";
+        TrySizeFirstVideo();
+    }
+    void SyncEditMarkers(){bool editing=sideOpen&&sideMode=="edit";seek.MarkIn=editing?markIn:-1;seek.MarkOut=editing?markOut:-1;seek.Invalidate();}
+    void TrySizeFirstVideo(){if(firstVideoSized||info==null)return;firstVideoSized=true;if(!full)SetVideoWindowScale(1);}
+    void ShowWindowSizes(){var m=Menu();foreach(var factor in new[]{0.5,0.75,1.0,1.5,2.0}){var scale=factor;var item=m.Items.Add(scale==1?"원본 크기 · 1×":$"{scale:0.##}× 크기",null,(_,_)=>SetVideoWindowScale(scale));item.Enabled=info!=null;}m.Show(windowSize,new Point(0,-m.PreferredSize.Height));}
+    void SetVideoWindowScale(double scale)
+    {
+        if(info==null||info.Width<=0||info.Height<=0)return;if(full)Fullscreen();
+        WindowState=FormWindowState.Normal;var area=Screen.FromControl(this).WorkingArea;
+        double width=info.Width*scale,height=info.Height*scale;int extra=sideOpen?340:0;
+        double fit=Math.Min(1,Math.Min((area.Width-extra)/width,area.Height/height));
+        ClientSize=new((int)Math.Round(width*fit)+extra,(int)Math.Round(height*fit));
+        Location=new(area.Left+(area.Width-Width)/2,area.Top+(area.Height-Height)/2);
+        player?.Set("video-unscaled","no");player?.Set("panscan",0);player?.Set("video-zoom",0);
+        status.Text=$"창 크기 {scale:0.##}× · {video.Width} × {video.Height}";
     }
     void Remember(){if(player==null)return;prefs.Volume=player.Number("volume",65);prefs.Playlist=playlist.Take(1000).ToList();if(current!=null&&position>0)prefs.Positions[current]=position;if(prefs.Positions.Count>500)prefs.Positions=prefs.Positions.TakeLast(500).ToDictionary();}
     async void PlayFile(string file)
@@ -130,7 +161,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         Remember();StopShuttle();current=file;index=playlist.IndexOf(file);markIn=markOut=-1;info=null;eofHandled=false;position=duration=0;
         title.Text=Path.GetFileName(file)+"   ·   MooVideo";Text=title.Text;status.Text="불러오는 중…";
         player.Command("loadfile",file,"replace");probeToken?.Cancel();probeToken=new();var ct=probeToken.Token;
-        try{var result=await MediaTools.Probe(file,ct);if(ct.IsCancellationRequested||current!=file)return;info=result;status.Text=$"{result.Width} × {result.Height}  ·  {result.Fps:0.###} fps  ·  {result.Codec.ToUpperInvariant()}";if(sideMode=="info")BuildInfo();if(sideMode=="edit")BuildEditor();if(sideMode=="playlist")BuildLibrary();}
+        try{var result=await MediaTools.Probe(file,ct);if(ct.IsCancellationRequested||current!=file)return;info=result;TrySizeFirstVideo();status.Text=$"{result.Width} × {result.Height}  ·  {result.Fps:0.###} fps  ·  {result.Codec.ToUpperInvariant()}";if(sideMode=="info")BuildInfo();if(sideMode=="edit")BuildEditor();if(sideMode=="playlist")BuildLibrary();}
         catch(OperationCanceledException){}catch(Exception ex){if(!closing)status.Text="정보 읽기 실패: "+ex.Message.Split('\n')[0];}
     }
     void OpenFiles(){using var d=new OpenFileDialog{Title="영상 열기",Multiselect=true,Filter="미디어 파일|*.mp4;*.mov;*.mkv;*.avi;*.webm;*.mxf;*.m4v;*.ts;*.mpg;*.wmv;*.mp3;*.wav;*.flac|모든 파일|*.*"};if(d.ShowDialog(this)==DialogResult.OK)AddFiles(d.FileNames,true);}
@@ -150,7 +181,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     new ContextMenuStrip Menu(){var m=new ContextMenuStrip{BackColor=Theme.Panel,ForeColor=Theme.Text,ShowImageMargin=false};m.Closed+=(_,_)=>BeginInvoke(m.Dispose);return m;}
     void Maximize(){WindowState=WindowState==FormWindowState.Maximized?FormWindowState.Normal:FormWindowState.Maximized;}
     void Fullscreen(){if(!full){restoreBounds=Bounds;restoreState=WindowState;WindowState=FormWindowState.Normal;full=true;Bounds=Screen.FromControl(this).Bounds;}else{full=false;Bounds=restoreBounds;WindowState=restoreState;}lastPointerMove=DateTime.MinValue;volumePopup.Visible=false;LayoutPlayer();}
-    void OriginalWindowSize(){if(info==null||info.Width<=0||info.Height<=0)return;if(full)Fullscreen();var area=Screen.FromControl(this).WorkingArea;var w=Math.Clamp(info.Width+(sideOpen?340:0),MinimumSize.Width,area.Width);var h=Math.Clamp(info.Height,MinimumSize.Height,area.Height);WindowState=FormWindowState.Normal;Size=new(w,h);Location=new(area.Left+(area.Width-w)/2,area.Top+(area.Height-h)/2);player?.Set("video-unscaled","yes");status.Text=$"원본 크기 {info.Width} × {info.Height}";}
+    void OriginalWindowSize()=>SetVideoWindowScale(1);
     void Screenshot(){if(current==null)return;using var d=new SaveFileDialog{Title="현재 프레임 저장",Filter="PNG 이미지|*.png",FileName=Path.GetFileNameWithoutExtension(current)+"_"+position.ToString("0.000",CultureInfo.InvariantCulture)+".png"};if(d.ShowDialog(this)==DialogResult.OK){player?.Command("screenshot-to-file",d.FileName,"video");status.Text="프레임 저장 완료";}}
     void ShowTracks()
     {
@@ -202,7 +233,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     }
     public void Wheel(int delta,Point p)
     {
-        if(delta==0)return;if(p.X<video.Right/2){ChangeVolume(Math.Sign(delta)*2);return;}if(current==null)return;
+        if(delta==0)return;if(p.X<video.Right/2){ChangeVolume(Math.Sign(delta)*2);volumeFeedbackUntil=DateTime.UtcNow.AddMilliseconds(1300);lastPointerMove=DateTime.UtcNow;UpdateChromeVisibility(p);ShowVolumeFlyout();return;}if(current==null)return;
         var now=DateTime.UtcNow;var gap=(now-lastWheel).TotalMilliseconds;var direction=Math.Sign(delta);wheelBurst=gap<150&&direction==lastDirection?wheelBurst+1:1;lastWheel=now;lastDirection=direction;
         if(!shuttle)shuttleResume=!player!.Flag("pause");shuttle=true;player!.Set("pause","yes");
         if(wheelBurst<3){player.Command(direction>0?"frame-step":"frame-back-step");status.Text=direction>0?"다음 프레임":"이전 프레임";}
