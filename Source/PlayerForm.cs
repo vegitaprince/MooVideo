@@ -16,6 +16,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     readonly GradientShade topShade=new(true),bottomShade=new(false);
     readonly List<ResizeEdge> edges=new();
     bool firstVideoSized;
+    bool playbackStarted;
+    readonly ToolButton startupDefaults;
     DateTime volumeFeedbackUntil=DateTime.MinValue;
     readonly List<string> playlist=new(); Mpv? player; string? current; MediaInfo? info;
     double position,duration,markIn=-1,markOut=-1; int index=-1; bool eofHandled,shuttle,full,shuttleResume,sideOpen; string repeat="off"; Point? videoDown,lastPointer;
@@ -28,6 +30,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         AutoScaleMode=AutoScaleMode.Dpi; FormBorderStyle=FormBorderStyle.None;MinimumSize=new(320,180);Size=new(1360,840);StartPosition=FormStartPosition.CenterScreen;KeyPreview=true;AllowDrop=true;
         var ico=Path.Combine(AppContext.BaseDirectory,"MooVideo.ico");if(File.Exists(ico))Icon=new Icon(ico);
         Controls.Add(video);Controls.Add(topShade);Controls.Add(bottomShade); Controls.Add(side); Controls.Add(bottom); Controls.Add(header);Controls.Add(volumePopup);
+        startupDefaults=Button("","기본 앱 설정",WindowsIntegration.OpenDefaultApps,true);
+        Controls.Add(startupDefaults);
         foreach(var hit in new[]{10,11,12,15,13,14,16,17}){var edge=new ResizeEdge(this,hit);edges.Add(edge);Controls.Add(edge);}
         title.AutoEllipsis=true; header.Controls.Add(title);
         var min=Button("\uE921","최소화",()=>WindowState=FormWindowState.Minimized);var max=Button("\uE922","최대화 / 복원",Maximize);var close=Button("\uE8BB","닫기",Close);
@@ -92,6 +96,9 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         side.SetBounds(full?ClientSize.Width-340:ClientSize.Width-sw,0,full?340:sw,ClientSize.Height-bh);
         bottom.SetBounds(0,ClientSize.Height-bh,ClientSize.Width,bh);header.SetBounds(0,0,ClientSize.Width-sw,th);
         topShade.SetBounds(0,0,video.Width,82);bottomShade.SetBounds(0,ClientSize.Height-bh-40,ClientSize.Width,bh+40);
+        startupDefaults.SetBounds((video.Width-160)/2,video.Height/2+40,160,38);
+        startupDefaults.Visible=!playbackStarted;
+        startupDefaults.BringToFront();
         topShade.BringToFront();bottomShade.BringToFront();bottom.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
         seek.SetBounds(14,4,bottom.Width-28,22);int x=14;
         foreach(var b in leftButtons){bool show=ClientSize.Width>=600||b==leftButtons[0]||b==play||b==volume||b==speed||b==windowSize;b.Visible=show;if(!show)continue;b.SetBounds(x,32,b==play?44:36,36);x+=b.Width+5;}
@@ -135,6 +142,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     public static string Clock(double t)=>t>=3600?TimeSpan.FromSeconds(Math.Max(0,t)).ToString(@"hh\:mm\:ss"):TimeSpan.FromSeconds(Math.Max(0,t)).ToString(@"mm\:ss");
     void OnLoaded()
     {
+        playbackStarted=true;startupDefaults.Visible=false;
         eofHandled=false;video.Empty=false;video.Invalidate();player?.Set("pause","no");player?.Set("speed",1);
         if(current!=null&&prefs.Positions.TryGetValue(current,out var p)&&p>3&&p<player!.Number("duration")-3)player.Seek(p);
         status.Text="재생 중";

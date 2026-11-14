@@ -125,9 +125,9 @@ sealed class VideoSurface:Panel
         using var pen=new Pen(Theme.Muted,2);g.DrawRoundedRectangle(pen,new Rectangle(x-34,y-48,68,48),new Size(11,11));
         using var b=new SolidBrush(Theme.Accent);g.FillPolygon(b,new[]{new Point(x-5,y-36),new Point(x-5,y-12),new Point(x+13,y-24)});
         using var f=Theme.Font(25,FontStyle.Bold);Theme.DrawText(g,"MooVideo",f,Theme.Text,new Rectangle(0,y+22,Width,44),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
-        using var small=Theme.Font(10);Theme.DrawText(g,"영상을 위한 조용한 공간",small,Theme.Muted,new Rectangle(0,y+68,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
-        Theme.DrawText(g,"파일 열기  Ctrl + O    ·    폴더 열기  Ctrl + Shift + O",small,Theme.Muted,new Rectangle(0,y+122,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
-        Theme.DrawText(g,"상단에 놓으면 재생목록에 추가  /  중·하단에 놓으면 바로 재생",small,Theme.Muted,new Rectangle(0,y+154,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+        using var small=Theme.Font(10);
+        Theme.DrawText(g,"파일 열기  Ctrl + O    ·    폴더 열기  Ctrl + Shift + O",small,Theme.Muted,new Rectangle(0,y+150,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+        Theme.DrawText(g,"상단에 놓으면 재생목록에 추가  /  중·하단에 놓으면 바로 재생",small,Theme.Muted,new Rectangle(0,y+182,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
     }
 }
 static class Native

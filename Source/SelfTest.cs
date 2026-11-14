@@ -61,7 +61,11 @@ public sealed partial class PlayerForm
         void Check(bool b,string s){if(!b)throw new Exception(s);checks.Add("PASS "+s);}
         try {
             await Task.Delay(1200);Check(player!=null,"native player initialized");
+            Check(startupDefaults.Visible&&startupDefaults.Text=="기본 앱 설정","startup default app button visible");
+            timer.Stop();TopMost=true;BringToFront();Activate();UpdateChromeVisibility(new Point(-1,-1));await Task.Delay(200);
+            using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"startup-0.5.2.png"));}TopMost=false;timer.Start();
             AddFiles(new[]{Path.Combine(resultDir,"test 영상 with spaces.mp4")},true);await Task.Delay(1500);Check(duration>5&&player!.Number("video-params/w")==640,"embedded playback");
+            Check(!startupDefaults.Visible,"startup default app button hides on playback");
             Check(ClientSize==new Size(640,360),"first video matches source dimensions");
             SetVideoWindowScale(0.5);Check(ClientSize==new Size(320,180),"half-size window");
             Check(leftButtons.Where(b=>b.Visible).All(b=>b.Left>=0&&b.Right<=bottom.Width)&&rightButtons.All(b=>b.Right<=bottom.Width),"small window buttons fit");
