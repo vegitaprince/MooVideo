@@ -99,7 +99,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         side.SetBounds(full?ClientSize.Width-340:ClientSize.Width-sw,0,full?340:sw,ClientSize.Height-bh);
         bottom.SetBounds(0,ClientSize.Height-bh,ClientSize.Width,bh);header.SetBounds(0,0,ClientSize.Width-sw,th);
         topShade.SetBounds(0,0,video.Width,82);bottomShade.SetBounds(0,ClientSize.Height-bh-40,ClientSize.Width,bh+40);
-        startupDefaults.SetBounds((video.Width-160)/2,video.Height/2+40,160,38);
+        startupDefaults.SetBounds((video.Width-160)/2,video.WelcomeButtonTop,160,38);
         startupDefaults.Visible=!playbackStarted;
         startupDefaults.BringToFront();
         LayoutInk();inkCanvas.BringToFront();inkTools.BringToFront();
@@ -224,14 +224,14 @@ public sealed partial class PlayerForm:Form,IMessageFilter
             prefs.LastUpdateCheckUtc=DateTime.UtcNow;
             if(available==null){if(manual)MessageBox.Show(this,"최신 버전입니다.","MooVideo",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
             status.Text=$"MooVideo {available.Version.ToString(3)} 업데이트 가능";
-            if(manual&&MessageBox.Show(this,$"MooVideo {available.Version.ToString(3)} 버전이 있습니다.\n다운로드하여 설치할까요?","MooVideo 업데이트",MessageBoxButtons.YesNo,MessageBoxIcon.Information)!=DialogResult.Yes)return;
+            if(MessageBox.Show(this,$"새 버전 MooVideo {available.Version.ToString(3)}이 있습니다.\n지금 업데이트하시겠습니까?\n\n설치가 끝나면 앱을 다시 시작합니다.","MooVideo 업데이트",MessageBoxButtons.YesNo,MessageBoxIcon.Information)!=DialogResult.Yes){status.Text="업데이트를 나중에 설치합니다.";return;}
             updateToken=new();var progress=new Progress<double>(fraction=>{if(!closing){status.Text=$"업데이트 다운로드 {(int)(fraction*100)}%";if(!manual)title.Text=status.Text;}});
             Enabled=false;
             await Updates.DownloadAndStartAsync(available,progress,updateToken.Token,current??initialArgs.FirstOrDefault(File.Exists));
             status.Text="업데이트를 적용하기 위해 다시 시작합니다.";Close();
         }
         catch(OperationCanceledException){}
-        catch(Exception ex){if(manual&&!closing)Error(new Exception("업데이트를 확인하거나 설치하지 못했습니다.\n"+ex.Message));}
+        catch(Exception ex){if(!closing)Error(new Exception("업데이트를 확인하거나 설치하지 못했습니다.\n"+ex.Message+"\n\n영상 우클릭 → 업데이트 확인에서 다시 시도할 수 있습니다."));}
         finally{if(!closing){Enabled=true;if(!manual)title.Text=current==null?"MooVideo":Path.GetFileName(current)+" · MooVideo";}checkingUpdate=false;updateToken?.Dispose();updateToken=null;}
     }
     void OnKey(object? s,KeyEventArgs e)

@@ -80,7 +80,7 @@ public sealed partial class PlayerForm
             player.Set("pause","no");Wheel(120,new Point(ClientSize.Width-100,100));await Task.Delay(600);Check(!player.Flag("pause")&&player.Number("speed")==1,"right wheel resumes playing state");
             ToggleSide("playlist");await Task.Delay(600);Check(side.Visible&&tiles?.Controls.Count>0,"playlist renders");ToggleSide("playlist");Check(!side.Visible,"playlist hides");
             prefs.Folder=resultDir;ToggleSide("files");await Task.Delay(1000);Check(nativeFiles?.Ready==true&&nativeFiles.Width>0,"Windows file explorer renders");thumbSlider!.Value=250;Check(prefs.ThumbnailSize==250&&nativeFiles?.CurrentThumbnailSize==250,"Windows thumbnail size changes");
-            ToggleSide("edit");await Task.Delay(1500);Check(operation!=null&&keyframes.Count>0,"editor keyframes");
+            ToggleSide("edit");var keyWait=Stopwatch.StartNew();while(keyframes.Count==0&&keyWait.Elapsed.TotalSeconds<8)await Task.Delay(100);Check(operation!=null&&keyframes.Count>0,"editor keyframes");
             Size=MinimumSize;LayoutPlayer();Check(!rightButtons.Any(r=>leftButtons.Where(l=>l.Visible).Any(l=>r.Bounds.IntersectsWith(l.Bounds))),"minimum width controls do not overlap");Check(exportButton!=null&&exportButton.Parent is Panel footer&&footer.Bottom<=side.Height&&footer.Top>=0,"editor save control visible at minimum size");
             var sideClose=side.Controls.OfType<ToolButton>().First(c=>Equals(c.Tag,"sideClose"));Check(sideClose.Left>=0&&sideClose.Right<=side.Width-8,"sidebar close button fits at minimum size");
             UpdateChromeVisibility(new Point(40,100));Check(header.Visible&&header.Top==0&&video.Top==0&&video.Height==ClientSize.Height&&bottom.Bottom==ClientSize.Height,"controls overlay video");
