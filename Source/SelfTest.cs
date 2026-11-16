@@ -68,7 +68,7 @@ public sealed partial class PlayerForm
             Check(!startupDefaults.Visible,"startup default app button hides on playback");
             Check(ClientSize==new Size(640,360),"first video matches source dimensions");
             SetVideoWindowScale(0.5);Check(ClientSize==new Size(320,180),"half-size window");
-            Check(leftButtons.Where(b=>b.Visible).All(b=>b.Left>=0&&b.Right<=bottom.Width)&&rightButtons.All(b=>b.Right<=bottom.Width),"small window buttons fit");
+            Check(leftButtons.Where(b=>b.Visible).All(b=>b.Left>=0&&b.Right<=bottom.Width)&&rightButtons.Where(b=>b.Visible).All(b=>b.Left>=0&&b.Right<=bottom.Width),"small window buttons fit");
             Check(edges.Count==8&&edges.All(e=>e.Visible),"all edges and corners have resize targets");
             timer.Stop();UpdateChromeVisibility(new Point(100,100));ShowVolumeFlyout();Check(volumePopup.Top>=0&&volumePopup.Bottom<=ClientSize.Height&&time.Right<=bottom.Width,"small window volume and time fit");await Task.Delay(150);
             using(var small=new Bitmap(Width,Height)){using var g=Graphics.FromImage(small);g.CopyFromScreen(Location,Point.Empty,Size);small.Save(Path.Combine(resultDir,"ui-0.5.1-small.png"));}timer.Start();
@@ -94,6 +94,24 @@ public sealed partial class PlayerForm
             lastPointerMove=DateTime.UtcNow.AddSeconds(-3);UpdateChromeVisibility(new Point(40,40));Check(!bottom.Visible&&!header.Visible,"fullscreen controls hide after stillness");
             UpdateChromeVisibility(new Point(90,90));Check(bottom.Visible,"fullscreen controls return on movement");
             ToggleSide("playlist");UpdateChromeVisibility(new Point(ClientSize.Width-20,40));Check(side.Visible&&bottom.Visible,"fullscreen sidebar stays open while in use");Fullscreen();ToggleSide("playlist");Check(!full,"fullscreen exits");
+            player!.Set("pause","yes");player.Seek(2);await Task.Delay(250);ToggleInk();await Task.Delay(150);
+            Check(inkMode&&inkCanvas.Visible&&inkTools.Visible&&player.Flag("pause"),"drawing opens only on paused frame");
+            inkCanvas.PenColor=Color.Red;inkCanvas.PenSize=2;inkCanvas.Stroke(new PointF(.25f,.3f),new PointF(.75f,.3f));
+            var annotated=Path.Combine(resultDir,"annotated.png");SaveFrame(annotated);
+            using(var saved=new Bitmap(annotated)){var color=saved.GetPixel(saved.Width/2,(int)(saved.Height*.3));Check(saved.Width==640&&saved.Height==360&&color.R>230&&color.G<30&&color.B<30,"screenshot contains pen at original frame coordinates");}
+            inkCanvas.Erasing=true;inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
+            using(var saved=new Bitmap(Path.Combine(resultDir,"erased.png")))Check(saved.GetPixel(saved.Width/2,(int)(saved.Height*.3)).ToArgb()!=Color.Red.ToArgb(),"eraser removes drawn ink without erasing video");
+            inkCanvas.Erasing=false;inkCanvas.Stroke(new PointF(.2f,.55f),new PointF(.7f,.7f));
+            TopMost=true;Activate();timer.Stop();UpdateChromeVisibility(new Point(100,100));await Task.Delay(200);
+            using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"drawing-0.5.3.png"));}TopMost=false;timer.Start();
+            TogglePlay();await Task.Delay(150);Check(!inkMode&&!inkCanvas.HasInk&&!inkTools.Visible,"resume clears drawing automatically");
+            player.Set("pause","yes");player.Seek(0);await Task.Delay(150);OnKey(this,new KeyEventArgs(Keys.Right));await Task.Delay(150);Check(player.Number("time-pos")>4.8,"right arrow seeks five seconds");OnKey(this,new KeyEventArgs(Keys.Left));await Task.Delay(150);Check(player.Number("time-pos")<.2,"left arrow seeks back five seconds");
+            player.Set("volume",50);OnKey(this,new KeyEventArgs(Keys.Up));Check(player.Number("volume")==55,"up arrow raises volume");OnKey(this,new KeyEventArgs(Keys.Down));Check(player.Number("volume")==50,"down arrow lowers volume");
+            var numbered=Path.Combine(resultDir,"series");Directory.CreateDirectory(numbered);var src=Path.Combine(resultDir,"test 영상 with spaces.mp4");
+            foreach(var name in new[]{"test_10.mp4","test_1.mp4","test_2.mp4","other_3.mp4","test_2_edit.mp4","test_3.mp3"})File.Copy(src,Path.Combine(numbered,name),true);
+            var group=RelatedFiles.Find(Path.Combine(numbered,"test_2.mp4"));Check(group.Select(Path.GetFileName).SequenceEqual(new[]{"test_1.mp4","test_2.mp4","test_10.mp4"}),"related playlist uses exact prefix and numeric ordering, excludes other files");
+            AddFiles(new[]{Path.Combine(numbered,"test_2.mp4")},true);await Task.Delay(1600);Check(playlist.Contains(group[0])&&playlist.Contains(group[2]),"playing numbered file adds siblings automatically");
+            OnKey(this,new KeyEventArgs(Keys.PageUp));await Task.Delay(600);Check(current==group[0],"Page Up opens previous playlist file");OnKey(this,new KeyEventArgs(Keys.PageDown));await Task.Delay(600);Check(current==group[1],"Page Down opens next playlist file");
             await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks.Append("ALL PASSED"));
         }catch(Exception ex){checks.Add("FAIL "+ex);await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks);}
         Close();

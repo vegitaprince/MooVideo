@@ -37,7 +37,7 @@ internal static class Updates
         return new(version,zip!,checksum!);
     }
 
-    internal static async Task DownloadAndStartAsync(AvailableUpdate update,IProgress<double> progress,CancellationToken token)
+    internal static async Task DownloadAndStartAsync(AvailableUpdate update,IProgress<double> progress,CancellationToken token,string? reopen=null)
     {
         var stage=Path.Combine(Preferences.DataDirectory,"updates",update.Version.ToString(3)+"-"+Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
@@ -85,6 +85,7 @@ internal static class Updates
         var process=new ProcessStartInfo(helper){UseShellExecute=false,CreateNoWindow=true};
         process.ArgumentList.Add("--apply-update");process.ArgumentList.Add(Environment.ProcessId.ToString());
         process.ArgumentList.Add(app);process.ArgumentList.Add(AppContext.BaseDirectory);
+        if(reopen!=null)process.ArgumentList.Add(reopen);
         Process.Start(process);
     }
 
@@ -92,13 +93,15 @@ internal static class Updates
     {
         try
         {
-            if(args.Length!=4||!int.TryParse(args[1],out var parentId))return 2;
+            if(args.Length is <4 or >5||!int.TryParse(args[1],out var parentId))return 2;
             var source=Path.GetFullPath(args[2]);var target=Path.GetFullPath(args[3]);
             if(!File.Exists(Path.Combine(source,"MooVideo.exe"))||!Directory.Exists(target))return 3;
             try{using var parent=Process.GetProcessById(parentId);if(!parent.WaitForExit(30000))return 4;}catch(ArgumentException){}
             var backup=Path.Combine(Path.GetDirectoryName(source)!,"backup");Directory.CreateDirectory(backup);
             ReplaceFiles(source,target,backup);
-            Process.Start(new ProcessStartInfo(Path.Combine(target,"MooVideo.exe")){UseShellExecute=true});
+            var restart=new ProcessStartInfo(Path.Combine(target,"MooVideo.exe")){UseShellExecute=true};
+            if(args.Length==5&&File.Exists(args[4]))restart.ArgumentList.Add(args[4]);
+            Process.Start(restart);
             return 0;
         }
         catch(Exception ex)
