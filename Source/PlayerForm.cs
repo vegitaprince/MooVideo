@@ -10,6 +10,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     readonly Label title=Theme.Label("MooVideo",10),time=Theme.Label("00:00 / 00:00",9,Theme.Text),status=Theme.Label("READY",9,Theme.Muted),volumeState=Theme.Label("65%",9,Theme.Text);
     readonly VolumeSlider volumeSlider=new();
     readonly SeekBar seek=new(); readonly ToolTip tips=new(){BackColor=Theme.Field,ForeColor=Theme.Text,InitialDelay=450};
+    readonly SeekHitTarget seekHit;
     readonly System.Windows.Forms.Timer timer=new(){Interval=50},wheelTimer=new(){Interval=240};
     readonly List<ToolButton> leftButtons=new(),rightButtons=new();
     readonly ToolButton play,volume,speed,windowSize,loop,playlistButton,folderButton,editButton;
@@ -63,6 +64,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         rightButtons.Add(Button("\uE946","파일 정보 / 도움말 · I",()=>ToggleSide("info")));
         rightButtons.Add(Button("\uE740","전체화면 · F11",Fullscreen));
         bottom.Controls.AddRange(leftButtons.Concat(rightButtons).Cast<Control>().ToArray());bottom.Controls.AddRange(new Control[]{seek,time,status});
+        seekHit=new SeekHitTarget(seek,screen=>leftButtons.Concat(rightButtons).Any(b=>b.Visible&&b.Bounds.Contains(bottom.PointToClient(screen))));Controls.Add(seekHit);
         foreach(var b in leftButtons.Concat(rightButtons).Concat(header.Controls.OfType<ToolButton>()))b.BackColor=OverlayPanel.KeyColor;
         InitializeInk();
         seek.BackColor=OverlayPanel.KeyColor;
@@ -100,11 +102,12 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         bottom.SetBounds(0,ClientSize.Height-bh,ClientSize.Width,bh);header.SetBounds(0,0,ClientSize.Width-sw,th);
         topShade.SetBounds(0,0,video.Width,82);bottomShade.SetBounds(0,ClientSize.Height-bh-40,ClientSize.Width,bh+40);
         startupDefaults.SetBounds((video.Width-160)/2,video.WelcomeButtonTop,160,38);
-        startupDefaults.Visible=!playbackStarted;
+        startupDefaults.Visible=!playbackStarted&&!video.Updating;
         startupDefaults.BringToFront();
         LayoutInk();inkCanvas.BringToFront();inkTools.BringToFront();
-        topShade.BringToFront();bottomShade.BringToFront();bottom.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
+        topShade.BringToFront();bottomShade.BringToFront();bottom.BringToFront();seekHit.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
         seek.SetBounds(14,4,bottom.Width-28,22);int x=14;
+        seekHit.SetBounds(bottom.Left+seek.Left,bottom.Top+seek.Top-10,seek.Width,seek.Height+20);
         foreach(var b in leftButtons){bool show=ClientSize.Width>=600||b==leftButtons[0]||b==play||b==volume||b==speed||b==windowSize;b.Visible=show;if(!show)continue;b.SetBounds(x,32,b==play?44:36,36);x+=b.Width+5;}
         int right=bottom.Width-14;foreach(var b in rightButtons.AsEnumerable().Reverse()){bool show=ClientSize.Width>=600||b==inkButton||b==rightButtons[0]||b==editButton||b==folderButton||b==playlistButton||b==rightButtons.Last();b.Visible=show;if(!show)continue;right-=36;b.SetBounds(right,compact?72:32,36,36);right-=5;}
         time.SetBounds(x+12,28,Math.Max(100,right-x-22),24);status.SetBounds(x+12,52,Math.Max(100,right-x-22),22);
@@ -124,9 +127,10 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         bool onVolume=volumePopup.Visible&&volumePopup.Bounds.Contains(p),onButton=bottom.Visible&&volume.Bounds.Contains(bottom.PointToClient(PointToScreen(p)));
         if(onVolume||onButton)lastVolumeHover=now;
         if(volumePopup.Visible&&!volumeSlider.Dragging&&!onVolume&&!onButton&&now>volumeFeedbackUntil&&(now-lastVolumeHover).TotalMilliseconds>350)volumePopup.Visible=false;
-        bool hold=bottom.Visible&&bottom.Bounds.Contains(p)||sideOpen&&side.Visible&&side.Bounds.Contains(p)||volumePopup.Visible&&onVolume;
+        bool hold=seek.Dragging||bottom.Visible&&bottom.Bounds.Contains(p)||sideOpen&&side.Visible&&side.Bounds.Contains(p)||volumePopup.Visible&&onVolume;
         bool visible=inside&&(!full||(now-lastPointerMove).TotalSeconds<2.2||hold);
         bottom.Visible=visible;header.Visible=visible&&!full;side.Visible=sideOpen&&(!full||visible);
+        seekHit.Visible=visible;
         bottomShade.Visible=visible;topShade.Visible=visible&&!full;
         if(!visible)volumePopup.Visible=false;
     }
@@ -226,14 +230,15 @@ public sealed partial class PlayerForm:Form,IMessageFilter
             status.Text=$"MooVideo {available.Version.ToString(3)} 업데이트 가능";
             if(MessageBox.Show(this,$"새 버전 MooVideo {available.Version.ToString(3)}이 있습니다.\n지금 업데이트하시겠습니까?\n\n설치가 끝나면 앱을 다시 시작합니다.","MooVideo 업데이트",MessageBoxButtons.YesNo,MessageBoxIcon.Information)!=DialogResult.Yes){status.Text="업데이트를 나중에 설치합니다.";return;}
             updateToken=new();var progress=new Progress<double>(fraction=>{if(!closing){status.Text=$"업데이트 다운로드 {(int)(fraction*100)}%";if(!manual)title.Text=status.Text;}});
-            Enabled=false;
+            SetUpdatingDisplay(true);Enabled=false;
             await Updates.DownloadAndStartAsync(available,progress,updateToken.Token,current??initialArgs.FirstOrDefault(File.Exists));
             status.Text="업데이트를 적용하기 위해 다시 시작합니다.";Close();
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(!closing)Error(new Exception("업데이트를 확인하거나 설치하지 못했습니다.\n"+ex.Message+"\n\n영상 우클릭 → 업데이트 확인에서 다시 시도할 수 있습니다."));}
-        finally{if(!closing){Enabled=true;if(!manual)title.Text=current==null?"MooVideo":Path.GetFileName(current)+" · MooVideo";}checkingUpdate=false;updateToken?.Dispose();updateToken=null;}
+        finally{if(!closing){SetUpdatingDisplay(false);Enabled=true;if(!manual)title.Text=current==null?"MooVideo":Path.GetFileName(current)+" · MooVideo";}checkingUpdate=false;updateToken?.Dispose();updateToken=null;}
     }
+    void SetUpdatingDisplay(bool updating){video.Updating=updating;startupDefaults.Visible=!playbackStarted&&!updating;video.Invalidate();}
     void OnKey(object? s,KeyEventArgs e)
     {
         if(ActiveControl is TextBoxBase||ActiveControl is NumericUpDown)return;

@@ -91,9 +91,13 @@ sealed class SeekBar:Control
     double At(int x)=>Math.Clamp((double)(x-8)/Math.Max(1,Width-16),0,1)*Duration;
     float X(double t)=>8+(float)(Math.Clamp(t/Math.Max(Duration,0.001),0,1)*(Width-16));
     void DragTo(int x){if(dragging=="in"){MarkIn=Math.Min(At(x),MarkOut>=0?MarkOut:Duration);MarkInChanged?.Invoke(MarkIn);}else if(dragging=="out"){MarkOut=Math.Max(At(x),MarkIn>=0?MarkIn:0);MarkOutChanged?.Invoke(MarkOut);}else UpdatePosition(x);Invalidate();}
-    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){dragging=MarkIn>=0&&Math.Abs(e.X-X(MarkIn))<11?"in":MarkOut>=0&&Math.Abs(e.X-X(MarkOut))<11?"out":"seek";Dragging=true;Capture=true;DragTo(e.X);}}
+    internal void BeginDrag(int x){dragging=MarkIn>=0&&Math.Abs(x-X(MarkIn))<11?"in":MarkOut>=0&&Math.Abs(x-X(MarkOut))<11?"out":"seek";Dragging=true;DragTo(x);}
+    internal void MoveDrag(int x){if(Dragging)DragTo(x);}
+    internal void EndDrag(int x){if(Dragging){DragTo(x);Dragging=false;dragging="";}}
+    internal void CancelDrag(){Dragging=false;dragging="";}
+    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){BeginDrag(e.X);Capture=true;}}
     protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(Dragging)DragTo(e.X);else Cursor=MarkIn>=0&&Math.Abs(e.X-X(MarkIn))<11||MarkOut>=0&&Math.Abs(e.X-X(MarkOut))<11?Cursors.SizeWE:Cursors.Hand;}
-    protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(Dragging){DragTo(e.X);Dragging=false;dragging="";Capture=false;}}
+    protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left){EndDrag(e.X);Capture=false;}}
     protected override void OnPaint(PaintEventArgs e)
     {
         var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;var y=Height/2f;var width=Width-16;
@@ -104,6 +108,19 @@ sealed class SeekBar:Control
         using var dot=new SolidBrush(Theme.Accent);g.FillEllipse(dot,X(Value)-4,y-4,8,8);
         foreach(var t in new[]{MarkIn,MarkOut})if(t>=0){using var m=new Pen(Theme.Accent,2);g.DrawLine(m,X(t),1,X(t),Height-1);using var brush=new SolidBrush(Theme.Accent);g.FillEllipse(brush,X(t)-5,y-5,10,10);}
     }
+}
+// Separate from the color-keyed chrome so its visually empty pixels still accept input.
+sealed class SeekHitTarget:Control
+{
+    readonly SeekBar seek;readonly Func<Point,bool> blocked;
+    internal SeekHitTarget(SeekBar seek,Func<Point,bool> blocked){this.seek=seek;this.blocked=blocked;BackColor=Color.Black;Cursor=Cursors.Hand;TabStop=false;AccessibleName="재생 위치 드래그 영역";}
+    protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x80000;return p;}}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SetLayeredWindowAttributes(Handle,0,1,2);}
+    protected override void WndProc(ref Message m){if(m.Msg==0x84&&!Capture&&blocked(Cursor.Position)){m.Result=(IntPtr)(-1);return;}base.WndProc(ref m);}
+    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){Capture=true;seek.BeginDrag(e.X);}}
+    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);seek.MoveDrag(e.X);}
+    protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left){seek.EndDrag(e.X);Capture=false;}}
+    protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture)seek.CancelDrag();}
 }
 sealed class TimeField:TextBox
 {
@@ -117,6 +134,8 @@ sealed class TimeField:TextBox
 sealed class VideoSurface:Panel
 {
     public bool Empty=true; public string DropHint="";
+    internal bool Updating;
+    internal string WelcomeText=>Updating?"업데이트 중":"MooVideo";
     internal int WelcomeTitleHeight {get{using var font=Theme.Font(25,FontStyle.Bold);return TextRenderer.MeasureText("MooVideo",font,Size.Empty,TextFormatFlags.SingleLine).Height+12;}}
     internal int WelcomeButtonTop=>Height/2-23+WelcomeTitleHeight+16;
     public VideoSurface(){BackColor=Theme.Bg;DoubleBuffered=true;AllowDrop=true;TabStop=true;SetStyle(ControlStyles.ResizeRedraw,true);}
@@ -126,7 +145,7 @@ sealed class VideoSurface:Panel
         var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;var x=Width/2;var y=Height/2-45;
         using var pen=new Pen(Theme.Muted,2);g.DrawRoundedRectangle(pen,new Rectangle(x-34,y-48,68,48),new Size(11,11));
         using var b=new SolidBrush(Theme.Accent);g.FillPolygon(b,new[]{new Point(x-5,y-36),new Point(x-5,y-12),new Point(x+13,y-24)});
-        using var f=Theme.Font(25,FontStyle.Bold);Theme.DrawText(g,"MooVideo",f,Theme.Text,new Rectangle(0,y+22,Width,WelcomeTitleHeight),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
+        using var f=Theme.Font(25,FontStyle.Bold);Theme.DrawText(g,WelcomeText,f,Theme.Text,new Rectangle(0,y+22,Width,WelcomeTitleHeight),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
         using var small=Theme.Font(10);
         Theme.DrawText(g,"파일 열기  Ctrl + O    ·    폴더 열기  Ctrl + Shift + O",small,Theme.Muted,new Rectangle(0,WelcomeButtonTop+62,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
         Theme.DrawText(g,"상단에 놓으면 재생목록에 추가  /  중·하단에 놓으면 바로 재생",small,Theme.Muted,new Rectangle(0,WelcomeButtonTop+94,Width,28),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);

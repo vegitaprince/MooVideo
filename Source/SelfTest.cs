@@ -62,6 +62,10 @@ public sealed partial class PlayerForm
         try {
             await Task.Delay(1200);Check(player!=null,"native player initialized");
             Check(startupDefaults.Visible&&startupDefaults.Text=="기본 앱 설정","startup default app button visible");
+            SetUpdatingDisplay(true);Check(video.WelcomeText=="업데이트 중"&&!startupDefaults.Visible,"welcome title changes during update");
+            timer.Stop();TopMost=true;Activate();UpdateChromeVisibility(new Point(-1,-1));await Task.Delay(150);
+            using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"updating-0.5.5.png"));}TopMost=false;timer.Start();
+            SetUpdatingDisplay(false);Check(video.WelcomeText=="MooVideo"&&startupDefaults.Visible,"welcome display restored after update cancellation or failure");
             timer.Stop();TopMost=true;BringToFront();Activate();UpdateChromeVisibility(new Point(-1,-1));await Task.Delay(200);
             using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"startup-0.5.2.png"));}TopMost=false;timer.Start();
             AddFiles(new[]{Path.Combine(resultDir,"test 영상 with spaces.mp4")},true);await Task.Delay(1500);Check(duration>5&&player!.Number("video-params/w")==640,"embedded playback");
@@ -73,6 +77,16 @@ public sealed partial class PlayerForm
             timer.Stop();UpdateChromeVisibility(new Point(100,100));ShowVolumeFlyout();Check(volumePopup.Top>=0&&volumePopup.Bottom<=ClientSize.Height&&time.Right<=bottom.Width,"small window volume and time fit");await Task.Delay(150);
             using(var small=new Bitmap(Width,Height)){using var g=Graphics.FromImage(small);g.CopyFromScreen(Location,Point.Empty,Size);small.Save(Path.Combine(resultDir,"ui-0.5.1-small.png"));}timer.Start();
             SetVideoWindowScale(1);
+            player!.Set("pause","yes");TopMost=true;Activate();UpdateChromeVisibility(new Point(100,100));
+            Check(seekHit.Top==bottom.Top+seek.Top-10&&seekHit.Height==seek.Height+20,"seek hit target extends ten pixels above and below");
+            foreach(int y in new[]{1,seekHit.Height-2}){
+                IntPtr Pack(int x)=>(IntPtr)((y<<16)|(x&0xffff));
+                Native.SendMessage(seekHit.Handle,0x201,(IntPtr)1,Pack(seekHit.Width/4));
+                Native.SendMessage(seekHit.Handle,0x200,(IntPtr)1,Pack(seekHit.Width/2));
+                Check(seek.Dragging,"expanded target maintains drag capture");
+                Native.SendMessage(seekHit.Handle,0x202,IntPtr.Zero,Pack(seekHit.Width*3/4));
+                await Task.Delay(250);Check(!seek.Dragging&&player.Number("time-pos")>4.3&&player.Number("time-pos")<4.8,$"seek drag works at target y={y}");
+            }TopMost=false;
             player!.Set("pause","yes");player.Seek(2);await Task.Delay(200);var before=player.Number("time-pos");Frame(1);await Task.Delay(300);Check(player.Number("time-pos")>before,"forward frame");Frame(-1);await Task.Delay(300);Check(Math.Abs(player.Number("time-pos")-before)<0.05,"back frame");
             var vol=player.Number("volume");Wheel(120,new Point(100,100));Check(player.Number("volume")==Math.Min(100,vol+2),"wheel volume");
             Check(volumePopup.Visible&&volumeState.Text==$"{player.Number("volume"):0}%","wheel shows current volume slider");
