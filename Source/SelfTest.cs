@@ -119,6 +119,13 @@ public sealed partial class PlayerForm
             await Task.Delay(200);Check(!seek.Dragging&&Math.Abs(player.Number("time-pos")-inkPosition)<.02&&inkMode&&inkCanvas.HasInk,"drawing mode blocks direct and expanded seek dragging without clearing ink");
             var annotated=Path.Combine(resultDir,"annotated.png");SaveFrame(annotated);
             using(var saved=new Bitmap(annotated)){var color=saved.GetPixel(saved.Width/2,(int)(saved.Height*.3));Check(saved.Width==640&&saved.Height==360&&color.R>230&&color.G<30&&color.B<30,"screenshot contains pen at original frame coordinates");}
+            var previousClipboard=Clipboard.GetDataObject();
+            try{
+                ActiveControl=play;var copyKey=new KeyEventArgs(Keys.Control|Keys.C);OnKey(this,copyKey);
+                using var copied=Clipboard.GetImage();Check(copyKey.Handled&&copied!=null&&copied.Width==640&&copied.Height==360,"Ctrl+C copies screenshot at original resolution");
+                using var bitmap=new Bitmap(copied!);var color=bitmap.GetPixel(bitmap.Width/2,(int)(bitmap.Height*.3));Check(color.R>230&&color.G<30&&color.B<30&&inkMode&&player.Flag("pause"),"clipboard screenshot includes drawing and keeps paused editing state");
+                using var input=new TextBox{Text="sample text"};Controls.Add(input);ActiveControl=input;var textCopy=new KeyEventArgs(Keys.Control|Keys.C);OnKey(this,textCopy);Check(!textCopy.Handled,"Ctrl+C in text field stays available for text copying");Controls.Remove(input);ActiveControl=play;
+            }finally{if(previousClipboard!=null)Clipboard.SetDataObject(previousClipboard,true,5,100);else Clipboard.Clear();}
             inkCanvas.Erasing=true;inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
             using(var saved=new Bitmap(Path.Combine(resultDir,"erased.png")))Check(saved.GetPixel(saved.Width/2,(int)(saved.Height*.3)).ToArgb()!=Color.Red.ToArgb(),"eraser removes drawn ink without erasing video");
             inkCanvas.Erasing=false;inkCanvas.Stroke(new PointF(.2f,.55f),new PointF(.7f,.7f));

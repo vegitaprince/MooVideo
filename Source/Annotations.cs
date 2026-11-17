@@ -105,9 +105,10 @@ public sealed partial class PlayerForm
         if(!inkMode&&!inkCanvas.HasInk)return;
         if(current==null||!player!.Flag("pause")||Math.Abs(player.Number("time-pos")-inkTime)>.04)ClearAnnotations();
     }
-    void SaveFrame(string path)
+    Bitmap CaptureFrame()
     {
         var temp=Path.Combine(Preferences.DataDirectory,"frame-"+Guid.NewGuid().ToString("N")+".png");Directory.CreateDirectory(Preferences.DataDirectory);
-        try{player!.Command("screenshot-to-file",temp,"video");using var image=new Bitmap(temp);using(var g=Graphics.FromImage(image))inkCanvas.Composite(g,image.Size);image.Save(path,System.Drawing.Imaging.ImageFormat.Png);}finally{if(File.Exists(temp))File.Delete(temp);}
+        try{player!.Command("screenshot-to-file",temp,"video");using var source=new Bitmap(temp);var image=new Bitmap(source);try{using var g=Graphics.FromImage(image);inkCanvas.Composite(g,image.Size);return image;}catch{image.Dispose();throw;}}finally{if(File.Exists(temp))File.Delete(temp);}
     }
+    void SaveFrame(string path){using var image=CaptureFrame();image.Save(path,System.Drawing.Imaging.ImageFormat.Png);}
 }
