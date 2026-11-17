@@ -84,6 +84,7 @@ public sealed partial class PlayerForm
     void UpdateInkTools()
     {
         if(inkButton==null)return;
+        seek.DragAllowed=!inkMode;seekHit.SyncDragPermission();
         inkButton.Selected=inkMode;inkButton.Invalidate();
         if(penTool!=null){penTool.Selected=!inkCanvas.Erasing;eraserTool!.Selected=inkCanvas.Erasing;penTool.Invalidate();eraserTool.Invalidate();}
         if(inkColorButton!=null){inkColorButton.Text=inkCanvas.PenColor==Color.White?"흰색":inkCanvas.PenColor==Color.Black?"검정":inkCanvas.PenColor==Color.Red?"빨강":inkCanvas.PenColor==Color.Yellow?"노랑":inkCanvas.PenColor==Color.Lime?"초록":"파랑";inkColorButton.Invalidate();inkWidthButton!.Text=new[]{"얇음","중간","두꺼움"}[inkCanvas.Erasing?inkCanvas.EraserSize:inkCanvas.PenSize];inkWidthButton.Invalidate();}

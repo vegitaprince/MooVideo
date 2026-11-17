@@ -111,6 +111,12 @@ public sealed partial class PlayerForm
             player!.Set("pause","yes");player.Seek(2);await Task.Delay(250);ToggleInk();await Task.Delay(150);
             Check(inkMode&&inkCanvas.Visible&&inkTools.Visible&&player.Flag("pause"),"drawing opens only on paused frame");
             inkCanvas.PenColor=Color.Red;inkCanvas.PenSize=2;inkCanvas.Stroke(new PointF(.25f,.3f),new PointF(.75f,.3f));
+            var inkPosition=player.Number("time-pos");
+            foreach(var target in new Control[]{seekHit,seek})foreach(int y in new[]{1,target.Height/2,target.Height-2}){
+                IntPtr Pack(int x)=>(IntPtr)((y<<16)|(x&0xffff));
+                Native.SendMessage(target.Handle,0x201,(IntPtr)1,Pack(target.Width/4));Native.SendMessage(target.Handle,0x200,(IntPtr)1,Pack(target.Width*3/4));Native.SendMessage(target.Handle,0x202,IntPtr.Zero,Pack(target.Width*3/4));
+            }
+            await Task.Delay(200);Check(!seek.Dragging&&Math.Abs(player.Number("time-pos")-inkPosition)<.02&&inkMode&&inkCanvas.HasInk,"drawing mode blocks direct and expanded seek dragging without clearing ink");
             var annotated=Path.Combine(resultDir,"annotated.png");SaveFrame(annotated);
             using(var saved=new Bitmap(annotated)){var color=saved.GetPixel(saved.Width/2,(int)(saved.Height*.3));Check(saved.Width==640&&saved.Height==360&&color.R>230&&color.G<30&&color.B<30,"screenshot contains pen at original frame coordinates");}
             inkCanvas.Erasing=true;inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
@@ -118,7 +124,8 @@ public sealed partial class PlayerForm
             inkCanvas.Erasing=false;inkCanvas.Stroke(new PointF(.2f,.55f),new PointF(.7f,.7f));
             TopMost=true;Activate();timer.Stop();UpdateChromeVisibility(new Point(100,100));await Task.Delay(200);
             using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"drawing-0.5.3.png"));}TopMost=false;timer.Start();
-            TogglePlay();await Task.Delay(150);Check(!inkMode&&!inkCanvas.HasInk&&!inkTools.Visible,"resume clears drawing automatically");
+            Native.SendMessage(play.Handle,0x201,(IntPtr)1,(IntPtr)(10|(10<<16)));Native.SendMessage(play.Handle,0x202,IntPtr.Zero,(IntPtr)(10|(10<<16)));await Task.Delay(150);Check(!player.Flag("pause")&&!inkMode&&!inkCanvas.HasInk&&!inkTools.Visible&&seek.DragAllowed,"play button still resumes and unlocks seek after drawing");
+            player.Set("pause","yes");ToggleInk();OnKey(this,new KeyEventArgs(Keys.Space));await Task.Delay(150);Check(!player.Flag("pause")&&!inkMode&&seek.DragAllowed,"space still resumes and unlocks seek after drawing");
             player.Set("pause","yes");player.Seek(0);await Task.Delay(150);OnKey(this,new KeyEventArgs(Keys.Right));await Task.Delay(150);Check(player.Number("time-pos")>4.8,"right arrow seeks five seconds");OnKey(this,new KeyEventArgs(Keys.Left));await Task.Delay(150);Check(player.Number("time-pos")<.2,"left arrow seeks back five seconds");
             player.Set("volume",50);OnKey(this,new KeyEventArgs(Keys.Up));Check(player.Number("volume")==55,"up arrow raises volume");OnKey(this,new KeyEventArgs(Keys.Down));Check(player.Number("volume")==50,"down arrow lowers volume");
             var numbered=Path.Combine(resultDir,"series");Directory.CreateDirectory(numbered);var src=Path.Combine(resultDir,"test 영상 with spaces.mp4");

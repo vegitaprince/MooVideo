@@ -85,18 +85,19 @@ sealed class VolumeSlider:Control
 }
 sealed class SeekBar:Control
 {
+    internal bool DragAllowed=true;
     public double Value,Duration,MarkIn=-1,MarkOut=-1; public bool Dragging; string dragging=""; public event Action<double>? Seek; public event Action<double>? MarkInChanged,MarkOutChanged;
     public SeekBar() {Height=22;Cursor=Cursors.Hand;AccessibleName="재생 위치";SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.UserPaint,true);}
     void UpdatePosition(int x){if(Duration>0){Value=Math.Clamp((double)(x-8)/Math.Max(1,Width-16),0,1)*Duration;Seek?.Invoke(Value);Invalidate();}}
     double At(int x)=>Math.Clamp((double)(x-8)/Math.Max(1,Width-16),0,1)*Duration;
     float X(double t)=>8+(float)(Math.Clamp(t/Math.Max(Duration,0.001),0,1)*(Width-16));
     void DragTo(int x){if(dragging=="in"){MarkIn=Math.Min(At(x),MarkOut>=0?MarkOut:Duration);MarkInChanged?.Invoke(MarkIn);}else if(dragging=="out"){MarkOut=Math.Max(At(x),MarkIn>=0?MarkIn:0);MarkOutChanged?.Invoke(MarkOut);}else UpdatePosition(x);Invalidate();}
-    internal void BeginDrag(int x){dragging=MarkIn>=0&&Math.Abs(x-X(MarkIn))<11?"in":MarkOut>=0&&Math.Abs(x-X(MarkOut))<11?"out":"seek";Dragging=true;DragTo(x);}
-    internal void MoveDrag(int x){if(Dragging)DragTo(x);}
-    internal void EndDrag(int x){if(Dragging){DragTo(x);Dragging=false;dragging="";}}
+    internal void BeginDrag(int x){if(!DragAllowed)return;dragging=MarkIn>=0&&Math.Abs(x-X(MarkIn))<11?"in":MarkOut>=0&&Math.Abs(x-X(MarkOut))<11?"out":"seek";Dragging=true;DragTo(x);}
+    internal void MoveDrag(int x){if(DragAllowed&&Dragging)DragTo(x);}
+    internal void EndDrag(int x){if(DragAllowed&&Dragging)DragTo(x);CancelDrag();}
     internal void CancelDrag(){Dragging=false;dragging="";}
-    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){BeginDrag(e.X);Capture=true;}}
-    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(Dragging)DragTo(e.X);else Cursor=MarkIn>=0&&Math.Abs(e.X-X(MarkIn))<11||MarkOut>=0&&Math.Abs(e.X-X(MarkOut))<11?Cursors.SizeWE:Cursors.Hand;}
+    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left&&DragAllowed){BeginDrag(e.X);Capture=true;}}
+    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(!DragAllowed){Cursor=Cursors.No;return;}if(Dragging)DragTo(e.X);else Cursor=MarkIn>=0&&Math.Abs(e.X-X(MarkIn))<11||MarkOut>=0&&Math.Abs(e.X-X(MarkOut))<11?Cursors.SizeWE:Cursors.Hand;}
     protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left){EndDrag(e.X);Capture=false;}}
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -117,8 +118,9 @@ sealed class SeekHitTarget:Control
     protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x80000;return p;}}
     protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SetLayeredWindowAttributes(Handle,0,1,2);}
     protected override void WndProc(ref Message m){if(m.Msg==0x84&&!Capture&&blocked(Cursor.Position)){m.Result=(IntPtr)(-1);return;}base.WndProc(ref m);}
-    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){Capture=true;seek.BeginDrag(e.X);}}
-    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);seek.MoveDrag(e.X);}
+    internal void SyncDragPermission(){if(!seek.DragAllowed){seek.CancelDrag();seek.Capture=false;Capture=false;}Cursor=seek.Cursor=seek.DragAllowed?Cursors.Hand:Cursors.No;}
+    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left&&seek.DragAllowed){Capture=true;seek.BeginDrag(e.X);}}
+    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);Cursor=seek.DragAllowed?Cursors.Hand:Cursors.No;seek.MoveDrag(e.X);}
     protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left){seek.EndDrag(e.X);Capture=false;}}
     protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture)seek.CancelDrag();}
 }
