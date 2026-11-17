@@ -13,7 +13,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     readonly SeekHitTarget seekHit;
     readonly System.Windows.Forms.Timer timer=new(){Interval=50},wheelTimer=new(){Interval=240};
     readonly List<ToolButton> leftButtons=new(),rightButtons=new();
-    readonly ToolButton play,volume,speed,windowSize,loop,playlistButton,folderButton,editButton;
+    readonly ToolButton play,volume,speed,windowSize,loop,playlistButton,folderButton,editButton,screenshotSaveButton,screenshotCopyButton;
     readonly GradientShade topShade=new(true),bottomShade=new(false);
     readonly List<ResizeEdge> edges=new();
     bool firstVideoSized;
@@ -55,7 +55,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         speed=Button("","재생 속도",ShowSpeed);speed.Text="1×";leftButtons.Add(speed);
         windowSize=Button("\uE9A6","창 크기 · 원본 / 배율",ShowWindowSizes);leftButtons.Add(windowSize);
         loop=Button("\uE8EE","반복: 끔 / 한 곡 / 목록",CycleRepeat);leftButtons.Add(loop);
-        rightButtons.Add(Button("\uE8B9","스크린샷 · 저장 / 클립보드 복사",ShowScreenshotMenu));
+        screenshotSaveButton=Button("\uE8B9","스크린샷 파일로 저장 · S",Screenshot);rightButtons.Add(screenshotSaveButton);
+        screenshotCopyButton=Button("\uE8C8","스크린샷 클립보드 복사 · Ctrl+C",CopyScreenshot);rightButtons.Add(screenshotCopyButton);
         inkButton=Button("\uED63","일시정지 그림 도구 · D",ToggleInk);rightButtons.Add(inkButton);
         rightButtons.Add(Button("\uE8F2","자막 / 오디오 트랙",ShowTracks));
         editButton=Button("\uE8C6","무손실 편집 · E",()=>ToggleSide("edit"));rightButtons.Add(editButton);
@@ -109,7 +110,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         seek.SetBounds(14,4,bottom.Width-28,22);int x=14;
         seekHit.SetBounds(bottom.Left+seek.Left,bottom.Top+seek.Top-10,seek.Width,seek.Height+20);
         foreach(var b in leftButtons){bool show=ClientSize.Width>=600||b==leftButtons[0]||b==play||b==volume||b==speed||b==windowSize;b.Visible=show;if(!show)continue;b.SetBounds(x,32,b==play?44:36,36);x+=b.Width+5;}
-        int right=bottom.Width-14;foreach(var b in rightButtons.AsEnumerable().Reverse()){bool show=ClientSize.Width>=600||b==inkButton||b==rightButtons[0]||b==editButton||b==folderButton||b==playlistButton||b==rightButtons.Last();b.Visible=show;if(!show)continue;right-=36;b.SetBounds(right,compact?72:32,36,36);right-=5;}
+        int right=bottom.Width-14;foreach(var b in rightButtons.AsEnumerable().Reverse()){bool show=ClientSize.Width>=600||b==inkButton||b==screenshotSaveButton||b==screenshotCopyButton||b==editButton||b==folderButton||b==playlistButton||b==rightButtons.Last();b.Visible=show;if(!show)continue;right-=36;b.SetBounds(right,compact?72:32,36,36);right-=5;}
         time.SetBounds(x+12,28,Math.Max(100,right-x-22),24);status.SetBounds(x+12,52,Math.Max(100,right-x-22),22);
         time.Visible=true;status.Visible=!compact;
         if(compact)time.SetBounds(x+8,36,Math.Max(45,bottom.Width-x-22),24);
@@ -207,7 +208,6 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     void Fullscreen(){if(!full){restoreBounds=Bounds;restoreState=WindowState;WindowState=FormWindowState.Normal;full=true;Bounds=Screen.FromControl(this).Bounds;}else{full=false;Bounds=restoreBounds;WindowState=restoreState;}lastPointerMove=DateTime.MinValue;volumePopup.Visible=false;LayoutPlayer();}
     void OriginalWindowSize()=>SetVideoWindowScale(1);
     void Screenshot(){if(current==null)return;using var d=new SaveFileDialog{Title="현재 프레임과 그림 저장",Filter="PNG 이미지|*.png",FileName=Path.GetFileNameWithoutExtension(current)+"_"+position.ToString("0.000",CultureInfo.InvariantCulture)+".png"};if(d.ShowDialog(this)==DialogResult.OK){SaveFrame(d.FileName);status.Text="프레임 저장 완료";}}
-    void ShowScreenshotMenu(){if(current==null)return;var m=Menu();m.Items.Add("PNG 파일로 저장 · S",null,(_,_)=>Safe(Screenshot));m.Items.Add("클립보드에 복사 · Ctrl+C",null,(_,_)=>Safe(CopyScreenshot));m.Show(rightButtons[0],new Point(0,-m.PreferredSize.Height));}
     void CopyScreenshot(){if(current==null||player==null)return;using var image=CaptureFrame();var data=new DataObject();data.SetImage(image);Clipboard.SetDataObject(data,true,5,100);status.Text="스크린샷을 클립보드에 복사했습니다.";}
     void ShowTracks()
     {
