@@ -2,6 +2,10 @@
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.5.8/MooVideo-0.5.8-win-x64.zip)
+
+ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
 ## 0.5.8 변경 사항
 
 - 하단에 스크린샷 파일 저장 버튼과 클립보드 복사 버튼을 각각 배치했습니다. 저장은 S, 복사는 Ctrl+C로도 사용할 수 있습니다.
