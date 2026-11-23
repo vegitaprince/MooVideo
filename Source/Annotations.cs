@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.ComponentModel;
 namespace MooVideo;
 
 enum DrawingTool { Pen, Eraser, Text, Arrow }
@@ -8,7 +9,7 @@ enum DrawingTool { Pen, Eraser, Text, Arrow }
 sealed class InkCanvas : Control
 {
     sealed record StrokePath(DrawingTool Tool, Color Color, int Size, List<PointF> Points);
-    sealed record TextBoxInk(string Text, Color Color, PointF Origin);
+    sealed record TextBoxInk(string Text, Color Color, PointF Origin, int FontSize);
     static readonly float[] PenWidths = [2, 4.5f, 9];
     static readonly float[] EraserWidths = [8, 22, 45];
     const int UndoLimit = 100;
@@ -21,9 +22,13 @@ sealed class InkCanvas : Control
     PointF? pointerEnd;
     PointF textOffset;
     int selectedText = -1;
-    TextBoxInk? textBeforeMove;
+    TextBoxInk? textBeforeDrag;
+    SizeF? textResizeStart;
+    int? preferredTextSize;
+    internal const int MinTextSize = 8;
 
-    internal Color PenColor = Color.Red;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Color PenColor { get; set; } = Color.Red;
     internal DrawingTool Tool { get; private set; }
     internal bool Erasing => Tool == DrawingTool.Eraser;
     internal bool Editing;
@@ -31,8 +36,15 @@ sealed class InkCanvas : Control
     internal bool HasInk => strokes.Count != 0 || labels.Count != 0;
     internal bool Drawing => pointerStart != null;
     internal bool CanUndo => undo.Count > 0;
+    internal int MaxTextSize => ink == null ? 512 : Math.Clamp((int)(Math.Min(ink.Width, ink.Height) * .8f), MinTextSize, 512);
+    internal int DefaultTextSize => Math.Clamp(preferredTextSize ??
+        (ink == null ? 23 : (int)Math.Round(Math.Min(ink.Width, ink.Height * 1.78f) * .036f)), MinTextSize, MaxTextSize);
+    internal int TextSize => selectedText >= 0 ? labels[selectedText].FontSize : DefaultTextSize;
     internal event Action? HistoryChanged;
+    internal event Action? TextSizeChanged;
     internal event Action<PointF>? TextRequested;
+    internal event Action<PointF>? ColorPickRequested;
+    internal bool PickingColor { get; private set; }
 
     internal InkCanvas() { Visible = false; TabStop = false; Cursor = Cursors.Cross; }
     protected override CreateParams CreateParams { get { var p = base.CreateParams; p.ExStyle |= 0x80000; return p; } }
@@ -57,6 +69,7 @@ sealed class InkCanvas : Control
         ink = null;
         Render();
         Visible = false;
+        TextSizeChanged?.Invoke();
         HistoryChanged?.Invoke();
     }
 
@@ -70,6 +83,7 @@ sealed class InkCanvas : Control
         strokes = [];
         labels = [];
         selectedText = -1;
+        TextSizeChanged?.Invoke();
         RepaintStrokes();
         Render();
     }
@@ -82,6 +96,7 @@ sealed class InkCanvas : Control
         undo.RemoveAt(undo.Count - 1);
         revert();
         selectedText = -1;
+        TextSizeChanged?.Invoke();
         RepaintStrokes();
         Render();
         HistoryChanged?.Invoke();
@@ -103,15 +118,41 @@ sealed class InkCanvas : Control
         Render();
     }
 
-    internal void AddText(string text, PointF origin)
+    internal void SetColorPicking(bool enabled)
+    {
+        FinishGesture();
+        PickingColor = enabled;
+        Cursor = enabled || Tool != DrawingTool.Text ? Cursors.Cross : Cursors.IBeam;
+    }
+
+    internal void AddText(string text, PointF origin, int fontSize)
     {
         if (ink == null || string.IsNullOrWhiteSpace(text)) return;
-        var label = new TextBoxInk(text, PenColor, origin);
+        preferredTextSize = Math.Clamp(fontSize, MinTextSize, MaxTextSize);
+        var label = new TextBoxInk(text, PenColor, origin, preferredTextSize.Value);
         using (var g = Graphics.FromImage(ink))
-        using (var font = TextFont())
-            labels.Add(label with { Origin = ClampTextOrigin(origin, TextBounds(g, label, font).Size) });
+            labels.Add(FitText(g, label));
         selectedText = labels.Count - 1;
         RecordUndo(() => labels.RemoveAt(labels.Count - 1));
+        TextSizeChanged?.Invoke();
+        Render();
+    }
+
+    internal void SetTextSize(int fontSize)
+    {
+        if (ink == null) return;
+        fontSize = Math.Clamp(fontSize, MinTextSize, MaxTextSize);
+        if (selectedText < 0) preferredTextSize = fontSize;
+        else
+        {
+            int index = selectedText;
+            var original = labels[index];
+            if (fontSize == original.FontSize) return;
+            using var g = Graphics.FromImage(ink);
+            labels[index] = FitText(g, original with { FontSize = fontSize });
+            RecordUndo(() => labels[index] = original);
+        }
+        TextSizeChanged?.Invoke();
         Render();
     }
 
@@ -195,7 +236,7 @@ sealed class InkCanvas : Control
         }
     }
 
-    Font TextFont() => new("Segoe UI", Math.Max(10, Math.Min(ink!.Width, ink.Height * 1.78f) * .036f), FontStyle.Bold, GraphicsUnit.Pixel);
+    static Font TextFont(TextBoxInk label) => new("Segoe UI", label.FontSize, FontStyle.Bold, GraphicsUnit.Pixel);
     RectangleF TextBounds(Graphics g, TextBoxInk label, Font font)
     {
         var origin = ToFrame(label.Origin);
@@ -208,21 +249,53 @@ sealed class InkCanvas : Control
         Math.Clamp(origin.X, 0, Math.Max(0, 1 - textSize.Width / ink!.Width)),
         Math.Clamp(origin.Y, 0, Math.Max(0, 1 - textSize.Height / ink.Height)));
 
-    int FindText(PointF point)
+    TextBoxInk FitText(Graphics g, TextBoxInk label)
     {
-        using var g = Graphics.FromImage(ink!);
-        using var font = TextFont();
-        return labels.FindLastIndex(label => TextBounds(g, label, font).Contains(ToFrame(point)));
+        using var font = TextFont(label);
+        return label with { Origin = ClampTextOrigin(label.Origin, TextBounds(g, label, font).Size) };
+    }
+
+    int FindText(Graphics g, PointF framePoint)
+    {
+        for (int i = labels.Count - 1; i >= 0; i--)
+        {
+            using var font = TextFont(labels[i]);
+            if (TextBounds(g, labels[i], font).Contains(framePoint)) return i;
+        }
+        return -1;
+    }
+
+    RectangleF ResizeHandle(RectangleF bounds, float radius)
+    {
+        float rx = Math.Min(ink!.Width / 2f, radius * ink.Width / Math.Max(1, Width));
+        float ry = Math.Min(ink.Height / 2f, radius * ink.Height / Math.Max(1, Height));
+        // Keep the handle center clear of the viewer's window-resize edges.
+        float edgeX = Math.Min(ink.Width / 2f, 12f * ink.Width / Math.Max(1, Width));
+        float edgeY = Math.Min(ink.Height / 2f, 12f * ink.Height / Math.Max(1, Height));
+        float x = Math.Clamp(bounds.Right - rx, rx, ink.Width - edgeX);
+        float y = Math.Clamp(bounds.Bottom - ry, ry, ink.Height - edgeY);
+        return new RectangleF(x - rx, y - ry, 2 * rx, 2 * ry);
+    }
+
+    RectangleF? ResizeTarget(Graphics g, PointF framePoint)
+    {
+        if (selectedText < 0) return null;
+        var label = labels[selectedText];
+        using var font = TextFont(label);
+        var bounds = TextBounds(g, label, font);
+        var hit = ResizeHandle(bounds, 4);
+        hit.Inflate(4f * ink!.Width / Math.Max(1, Width), 4f * ink.Height / Math.Max(1, Height));
+        return hit.Contains(framePoint) ? bounds : null;
     }
 
     void DrawTextLabels(Graphics g, bool showSelection)
     {
         if (labels.Count == 0) return;
-        using var font = TextFont();
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
         for (int i = 0; i < labels.Count; i++)
         {
             var label = labels[i];
+            using var font = TextFont(label);
             var bounds = TextBounds(g, label, font);
             using var shadow = new SolidBrush(label.Color.GetBrightness() > .4 ? Color.FromArgb(220, Color.Black) : Color.FromArgb(220, Color.White));
             using var fill = new SolidBrush(label.Color);
@@ -232,8 +305,14 @@ sealed class InkCanvas : Control
             g.DrawString(label.Text, font, fill, bounds);
             if (showSelection && selectedText == i)
             {
-                using var border = new Pen(Color.White, Math.Max(1, ink!.Width / 640f)) { DashStyle = DashStyle.Dash };
+                float lineWidth = ink!.Width / (float)Math.Max(1, Width);
+                using var edge = new Pen(Color.Black, lineWidth * 2);
+                using var border = new Pen(Color.White, lineWidth) { DashStyle = DashStyle.Dash };
+                g.DrawRectangle(edge, bounds.X, bounds.Y, bounds.Width, bounds.Height);
                 g.DrawRectangle(border, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+                var handle = ResizeHandle(bounds, 4);
+                g.FillRectangle(Brushes.White, handle);
+                g.DrawRectangle(edge, handle.X, handle.Y, handle.Width, handle.Height);
             }
         }
     }
@@ -243,17 +322,28 @@ sealed class InkCanvas : Control
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left || !Editing || ink == null) return;
         var point = Normalize(e.Location);
+        if (PickingColor)
+        {
+            ColorPickRequested?.Invoke(point);
+            return;
+        }
         Capture = true;
         pointerStart = pointerEnd = point;
         if (Tool == DrawingTool.Text)
         {
-            selectedText = FindText(point);
+            using var g = Graphics.FromImage(ink);
+            var framePoint = ToFrame(point);
+            var target = ResizeTarget(g, framePoint);
+            textResizeStart = target?.Size;
+            if (target == null) selectedText = FindText(g, framePoint);
             if (selectedText >= 0)
             {
-                textBeforeMove = labels[selectedText];
-                var origin = textBeforeMove.Origin;
+                textBeforeDrag = labels[selectedText];
+                var origin = textBeforeDrag.Origin;
                 textOffset = new PointF(point.X - origin.X, point.Y - origin.Y);
             }
+            Cursor = target != null ? Cursors.SizeNWSE : selectedText >= 0 ? Cursors.SizeAll : Cursors.IBeam;
+            TextSizeChanged?.Invoke();
         }
         else
         {
@@ -266,11 +356,17 @@ sealed class InkCanvas : Control
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (!Editing || ink == null) return;
+        if (!Editing || ink == null || PickingColor) return;
         var point = Normalize(e.Location);
         if (pointerStart == null)
         {
-            if (Tool == DrawingTool.Text) Cursor = FindText(point) >= 0 ? Cursors.SizeAll : Cursors.IBeam;
+            if (Tool == DrawingTool.Text)
+            {
+                using var g = Graphics.FromImage(ink);
+                var framePoint = ToFrame(point);
+                Cursor = ResizeTarget(g, framePoint) != null ? Cursors.SizeNWSE :
+                    FindText(g, framePoint) >= 0 ? Cursors.SizeAll : Cursors.IBeam;
+            }
             return;
         }
         MoveGesture(point);
@@ -280,12 +376,25 @@ sealed class InkCanvas : Control
     {
         if (pointerEnd == point) return;
         pointerEnd = point;
-        if (textBeforeMove != null && selectedText >= 0)
+        if (textBeforeDrag is { } original && selectedText >= 0)
         {
             using var g = Graphics.FromImage(ink!);
-            using var font = TextFont();
-            var origin = ClampTextOrigin(new PointF(point.X - textOffset.X, point.Y - textOffset.Y), TextBounds(g, textBeforeMove, font).Size);
-            labels[selectedText] = textBeforeMove with { Origin = origin };
+            if (textResizeStart is SizeF size)
+            {
+                var start = pointerStart!.Value;
+                var movement = ToFrame(new PointF(point.X - start.X, point.Y - start.Y));
+                float scale = 1 + (movement.X * size.Width + movement.Y * size.Height) /
+                    (size.Width * size.Width + size.Height * size.Height);
+                int fontSize = Math.Clamp((int)Math.Round(original.FontSize * scale), MinTextSize, MaxTextSize);
+                if (fontSize == labels[selectedText].FontSize) return;
+                labels[selectedText] = FitText(g, original with { FontSize = fontSize });
+                TextSizeChanged?.Invoke();
+            }
+            else
+            {
+                var origin = new PointF(point.X - textOffset.X, point.Y - textOffset.Y);
+                labels[selectedText] = FitText(g, original with { Origin = origin });
+            }
         }
         else if (pending is { Tool: not DrawingTool.Arrow } path)
         {
@@ -301,7 +410,7 @@ sealed class InkCanvas : Control
         if (e.Button != MouseButtons.Left || pointerStart is not PointF start) return;
         var end = Normalize(e.Location);
         MoveGesture(end);
-        bool addText = Tool == DrawingTool.Text && textBeforeMove == null &&
+        bool addText = Tool == DrawingTool.Text && textBeforeDrag == null &&
             Math.Abs(start.X - end.X) * Width < 4 && Math.Abs(start.Y - end.Y) * Height < 4;
         FinishGesture();
         if (addText) TextRequested?.Invoke(end);
@@ -326,12 +435,13 @@ sealed class InkCanvas : Control
             }
             pending = null;
         }
-        if (textBeforeMove is TextBoxInk original && selectedText >= 0)
+        if (textBeforeDrag is TextBoxInk original && selectedText >= 0)
         {
             int index = selectedText;
             if (labels[index] != original) RecordUndo(() => labels[index] = original);
         }
-        textBeforeMove = null;
+        textBeforeDrag = null;
+        textResizeStart = null;
         Render();
     }
 
@@ -412,7 +522,7 @@ public sealed partial class PlayerForm
         AddTool(DrawingTool.Eraser, Button("\uE75C", "지우개", () => SelectDrawingTool(DrawingTool.Eraser)));
         var text = Button("", "텍스트", () => SelectDrawingTool(DrawingTool.Text));
         text.Text = "T";
-        tips.SetToolTip(text, "텍스트 · 영상에서 클릭하여 입력, 텍스트를 끌어서 이동");
+        tips.SetToolTip(text, "텍스트 · 영상에서 클릭하여 입력, 본문을 끌어 이동, 모서리를 끌어 크기 조절");
         AddTool(DrawingTool.Text, text);
         var arrow = Button("", "화살표", () => SelectDrawingTool(DrawingTool.Arrow));
         arrow.DrawContent = (g, area) =>
@@ -425,30 +535,79 @@ public sealed partial class PlayerForm
         AddTool(DrawingTool.Arrow, arrow);
         inkColorButton = Button("", "색상환", PickInkColor);
         inkColorButton.DrawContent = (g, bounds) => InkColorPicker.DrawSwatch(g, bounds, inkCanvas.PenColor, 18);
-        inkWidthButton = Button("", "굵기 선택", ShowInkWidths);
-        inkWidthButton.DrawContent = (g, bounds) => DrawWidthSample(g, bounds, inkCanvas.Erasing ? inkCanvas.EraserSize : inkCanvas.PenSize);
+        inkWidthButton = Button("", "굵기 선택", () =>
+        {
+            if (inkCanvas.Tool == DrawingTool.Text) ShowInkTextSettings();
+            else ShowInkWidths();
+        });
+        inkWidthButton.DrawContent = (g, bounds) =>
+        {
+            if (inkCanvas.Tool == DrawingTool.Text)
+            {
+                using var font = Theme.Font(9);
+                Theme.DrawText(g, inkCanvas.TextSize.ToString(), font, Theme.Text, bounds,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+            else DrawWidthSample(g, bounds, inkCanvas.Erasing ? inkCanvas.EraserSize : inkCanvas.PenSize);
+        };
         inkUndoButton = Button("\uE7A7", "실행 취소 · Ctrl+Z", inkCanvas.Undo);
         inkUndoButton.Enabled = false;
         inkTools.Controls.AddRange([inkColorButton, inkWidthButton, inkUndoButton,
             Button("\uE74D", "비우기", inkCanvas.ClearDrawing),
             Button("\uE8BB", "그림 도구 닫기", () => { inkMode = false; UpdateInkTools(); })]);
         inkCanvas.HistoryChanged += () => inkUndoButton.Enabled = inkCanvas.CanUndo;
-        inkCanvas.TextRequested += AddInkText;
-        inkCanvas.MouseClick += (_, e) => { if (e.Button == MouseButtons.Right) ShowContext(); };
+        inkCanvas.TextRequested += position => ShowInkTextSettings(position);
+        inkCanvas.TextSizeChanged += UpdateInkWidthButton;
+        inkCanvas.ColorPickRequested += point => Safe(() => PickVideoColor(point));
+        inkCanvas.MouseClick += (_, e) => { if (e.Button == MouseButtons.Right && !CancelInkColorPick()) ShowContext(); };
     }
 
     void SelectDrawingTool(DrawingTool tool)
     {
+        CancelInkColorPick();
         inkCanvas.SelectTool(tool);
         UpdateInkTools();
     }
 
     void PickInkColor()
     {
+        CancelInkColorPick();
         using var picker = new InkColorPicker(inkCanvas.PenColor);
         if (picker.ShowDialog(this) != DialogResult.OK) return;
+        if (picker.PickFromVideo)
+        {
+            SetInkColorPicking(true);
+            status.Text = "영상에서 색을 선택하세요 · Esc 취소";
+            return;
+        }
         inkCanvas.PenColor = picker.SelectedColor;
         UpdateInkTools();
+    }
+
+    bool CancelInkColorPick()
+    {
+        if (!inkCanvas.PickingColor) return false;
+        SetInkColorPicking(false);
+        status.Text = "스포이드 취소";
+        return true;
+    }
+
+    void SetInkColorPicking(bool enabled)
+    {
+        inkCanvas.SetColorPicking(enabled);
+        inkColorButton!.Selected = enabled;
+        inkColorButton.Invalidate();
+    }
+
+    void PickVideoColor(PointF point)
+    {
+        SetInkColorPicking(false);
+        using var frame = CaptureFrame(includeInk: false);
+        int x = Math.Min(frame.Width - 1, (int)(point.X * frame.Width));
+        int y = Math.Min(frame.Height - 1, (int)(point.Y * frame.Height));
+        inkCanvas.PenColor = frame.GetPixel(x, y);
+        UpdateInkTools();
+        status.Text = $"색상 선택 · #{inkCanvas.PenColor.R:X2}{inkCanvas.PenColor.G:X2}{inkCanvas.PenColor.B:X2}";
     }
 
     void DrawWidthSample(Graphics g, Rectangle bounds, int level)
@@ -513,34 +672,52 @@ public sealed partial class PlayerForm
         UpdateInkTools();
     }
 
-    void AddInkText(PointF position)
+    void ShowInkTextSettings(PointF? position = null)
     {
+        bool adding = position.HasValue;
+        if (!adding) CancelInkColorPick();
+        int sizeTop = adding ? 124 : 14;
+        int buttonsTop = sizeTop + 42;
         using var dialog = new Form
         {
-            Text = "영상에 텍스트 추가", StartPosition = FormStartPosition.CenterParent,
+            Text = adding ? "영상에 텍스트 추가" : "텍스트 크기", StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
-            ShowInTaskbar = false, ClientSize = new Size(352, 164), AutoScaleMode = AutoScaleMode.Dpi,
-            BackColor = Theme.Panel, ForeColor = Theme.Text
+            ShowInTaskbar = false, ClientSize = new Size(352, buttonsTop + 44), AutoScaleMode = AutoScaleMode.Dpi,
+            Font = Font, BackColor = Theme.Panel, ForeColor = Theme.Text
         };
         using var input = Theme.Input();
-        input.Multiline = true;
-        input.MaxLength = 240;
-        input.ScrollBars = ScrollBars.Vertical;
-        input.AccessibleName = "영상에 표시할 텍스트";
-        input.SetBounds(12, 12, 328, 98);
-        var ok = new Button { Text = "추가", DialogResult = DialogResult.OK, Bounds = new Rectangle(172, 120, 80, 32) };
-        var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(260, 120, 80, 32) };
+        if (adding)
+        {
+            input.Multiline = true;
+            input.MaxLength = 240;
+            input.ScrollBars = ScrollBars.Vertical;
+            input.AccessibleName = "영상에 표시할 텍스트";
+            input.SetBounds(12, 12, 328, 98);
+            dialog.Controls.Add(input);
+        }
+        var label = Theme.Label("글자 크기 (px)");
+        label.SetBounds(12, sizeTop, 110, 28);
+        var fontSize = new NumericUpDown
+        {
+            Minimum = InkCanvas.MinTextSize, Maximum = inkCanvas.MaxTextSize,
+            Value = adding ? inkCanvas.DefaultTextSize : inkCanvas.TextSize,
+            Bounds = new Rectangle(128, sizeTop, 90, 28),
+            BackColor = Theme.Field, ForeColor = Theme.Text, AccessibleName = "글자 크기 (픽셀)"
+        };
+        var ok = new Button { Text = adding ? "추가" : "적용", DialogResult = DialogResult.OK, Bounds = new Rectangle(172, buttonsTop, 80, 32) };
+        var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(260, buttonsTop, 80, 32) };
         foreach (var button in new[] { ok, cancel })
         {
             button.BackColor = Theme.Field;
             button.FlatStyle = FlatStyle.Flat;
         }
-        dialog.Controls.AddRange([input, ok, cancel]);
+        dialog.Controls.AddRange([label, fontSize, ok, cancel]);
         dialog.AcceptButton = ok;
         dialog.CancelButton = cancel;
-        dialog.ActiveControl = input;
-        if (dialog.ShowDialog(this) == DialogResult.OK && inkMode)
-            inkCanvas.AddText(input.Text.Trim(), position);
+        dialog.ActiveControl = adding ? input : fontSize;
+        if (dialog.ShowDialog(this) != DialogResult.OK || !inkMode) return;
+        if (position is PointF origin) inkCanvas.AddText(input.Text.Trim(), origin, (int)fontSize.Value);
+        else inkCanvas.SetTextSize((int)fontSize.Value);
     }
 
     void ToggleInk()
@@ -570,17 +747,29 @@ public sealed partial class PlayerForm
             inkColorButton.AccessibleName = colorName;
             tips.SetToolTip(inkColorButton, colorName);
             inkColorButton.Invalidate();
-            string tool = inkCanvas.Erasing ? "지우개" : "펜";
-            string level = DrawingSizeLabels[inkCanvas.Erasing ? inkCanvas.EraserSize : inkCanvas.PenSize];
-            inkWidthButton!.AccessibleName = $"{tool} 굵기 · {level}";
-            tips.SetToolTip(inkWidthButton, inkWidthButton.AccessibleName);
-            inkWidthButton.Invalidate();
         }
+        UpdateInkWidthButton();
+        if (!inkMode) CancelInkColorPick();
         inkTools.Visible = inkMode;
         inkCanvas.Editing = inkMode;
         if (!inkMode && inkCanvas.Drawing) inkCanvas.Capture = false;
         inkCanvas.Visible = inkMode || inkCanvas.HasInk;
         if (inkCanvas.Visible) inkCanvas.Render();
+    }
+
+    void UpdateInkWidthButton()
+    {
+        if (inkWidthButton == null) return;
+        string tool = inkCanvas.Erasing ? "지우개" : "펜";
+        string level = DrawingSizeLabels[inkCanvas.Erasing ? inkCanvas.EraserSize : inkCanvas.PenSize];
+        string description = inkCanvas.Tool == DrawingTool.Text ?
+            $"글자 크기 · {inkCanvas.TextSize} px" : $"{tool} 굵기 · {level}";
+        if (inkWidthButton.AccessibleName != description)
+        {
+            inkWidthButton.AccessibleName = description;
+            tips.SetToolTip(inkWidthButton, description);
+        }
+        inkWidthButton.Invalidate();
     }
 
     void LayoutInk()
@@ -603,10 +792,19 @@ public sealed partial class PlayerForm
         if(!inkMode&&!inkCanvas.HasInk)return;
         if(current==null||!player!.Flag("pause")||Math.Abs(player.Number("time-pos")-inkTime)>.04)ClearAnnotations();
     }
-    Bitmap CaptureFrame()
+    Bitmap CaptureFrame(bool includeInk = true)
     {
         var temp=Path.Combine(Preferences.DataDirectory,"frame-"+Guid.NewGuid().ToString("N")+".png");Directory.CreateDirectory(Preferences.DataDirectory);
-        try{player!.Command("screenshot-to-file",temp,"video");using var source=new Bitmap(temp);var image=new Bitmap(source);try{using var g=Graphics.FromImage(image);inkCanvas.Composite(g,image.Size);return image;}catch{image.Dispose();throw;}}finally{if(File.Exists(temp))File.Delete(temp);}
+        try
+        {
+            player!.Command("screenshot-to-file",temp,"video");
+            using var source = new Bitmap(temp);
+            var image = new Bitmap(source);
+            if (!includeInk) return image;
+            try{using var g=Graphics.FromImage(image);inkCanvas.Composite(g,image.Size);return image;}
+            catch{image.Dispose();throw;}
+        }
+        finally{if(File.Exists(temp))File.Delete(temp);}
     }
     void SaveFrame(string path){using var image=CaptureFrame();image.Save(path,System.Drawing.Imaging.ImageFormat.Png);}
 }

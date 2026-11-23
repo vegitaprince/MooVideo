@@ -127,8 +127,22 @@ public sealed partial class PlayerForm
             player!.Set("pause","yes");player.Seek(2);await Task.Delay(200);var before=player.Number("time-pos");Frame(1);await Task.Delay(300);Check(player.Number("time-pos")>before,"forward frame");Frame(-1);await Task.Delay(300);Check(Math.Abs(player.Number("time-pos")-before)<0.05,"back frame");
             var vol=player.Number("volume");Wheel(120,new Point(100,100));Check(player.Number("volume")==Math.Min(100,vol+2),"wheel volume");
             Check(volumePopup.Visible&&volumeState.Text==$"{player.Number("volume"):0}%","wheel shows current volume slider");
-            Wheel(120,new Point(ClientSize.Width-100,100));await Task.Delay(600);Check(player.Flag("pause")&&player.Number("speed")==1,"right wheel preserves paused state");
-            player.Set("pause","no");Wheel(120,new Point(ClientSize.Width-100,100));await Task.Delay(600);Check(!player.Flag("pause")&&player.Number("speed")==1,"right wheel resumes playing state");
+            var frameWheel = new Point(ClientSize.Width - 100, 100);
+            before = player.Number("time-pos");
+            Wheel(120, frameWheel); await Task.Delay(360);
+            Check(player.Number("time-pos") < before && player.Flag("pause") && player.Number("speed") == 1, "wheel up steps backwards and stays paused");
+            var previousFrame = player.Number("time-pos");
+            Wheel(-120, frameWheel); await Task.Delay(360);
+            Check(player.Number("time-pos") > previousFrame, "wheel down steps forward");
+            foreach (int delta in new[] { 120, -120 })
+            {
+                before = player.Number("time-pos");
+                for (int i = 0; i < 4; i++) Wheel(delta, frameWheel);
+                Check(status.Text.StartsWith(delta > 0 ? "뒤로" : "앞으로"), "accelerated wheel uses the reversed direction");
+                await Task.Delay(360);
+                Check((player.Number("time-pos") - before) * -Math.Sign(delta) > 0 && player.Flag("pause"), "accelerated wheel moves in the announced direction");
+            }
+            player.Set("pause","no");Wheel(-120,frameWheel);await Task.Delay(600);Check(!player.Flag("pause")&&player.Number("speed")==1,"right wheel resumes playing state");
             ToggleSide("playlist");await Task.Delay(600);Check(side.Visible&&tiles?.Controls.Count>0,"playlist renders");ToggleSide("playlist");Check(!side.Visible,"playlist hides");
             prefs.Folder=resultDir;ToggleSide("files");await Task.Delay(1000);Check(nativeFiles?.Ready==true&&nativeFiles.Width>0,"Windows file explorer renders");thumbSlider!.Value=250;Check(prefs.ThumbnailSize==250&&nativeFiles?.CurrentThumbnailSize==250,"Windows thumbnail size changes");
             ToggleSide("edit");var keyWait=Stopwatch.StartNew();while(keyframes.Count==0&&keyWait.Elapsed.TotalSeconds<8)await Task.Delay(100);Check(operation!=null&&keyframes.Count>0,"editor keyframes");
@@ -159,9 +173,20 @@ public sealed partial class PlayerForm
             using(var saved=new Bitmap(annotated)){var color=saved.GetPixel(saved.Width/2,(int)(saved.Height*.3));Check(saved.Width==640&&saved.Height==360&&color.R>230&&color.G<30&&color.B<30,"screenshot contains pen at original frame coordinates");}
             var previousClipboard=Clipboard.GetDataObject();
             try{
+                Activate();UpdateChromeVisibility(new Point(100,100));
                 ActiveControl=play;var copyKey=new KeyEventArgs(Keys.Control|Keys.C);OnKey(this,copyKey);
-                using var copied=Clipboard.GetImage();Check(copyKey.Handled&&copied!=null&&copied.Width==640&&copied.Height==360,"Ctrl+C copies screenshot at original resolution");
-                using var bitmap=new Bitmap(copied!);var color=bitmap.GetPixel(bitmap.Width/2,(int)(bitmap.Height*.3));Check(color.R>230&&color.G<30&&color.B<30&&inkMode&&player.Flag("pause"),"clipboard screenshot includes drawing and keeps paused editing state");
+                Image? copied = Clipboard.GetImage();
+                for (int attempt = 0; copied == null && attempt < 5; attempt++)
+                {
+                    await Task.Delay(40);
+                    copied = Clipboard.GetImage();
+                }
+                using (copied)
+                {
+                    Check(copyKey.Handled&&copied!=null&&copied.Width==640&&copied.Height==360,
+                        $"Ctrl+C copies screenshot at original resolution (handled={copyKey.Handled}, size={copied?.Size})");
+                    using var bitmap=new Bitmap(copied!);var color=bitmap.GetPixel(bitmap.Width/2,(int)(bitmap.Height*.3));Check(color.R>230&&color.G<30&&color.B<30&&inkMode&&player.Flag("pause"),"clipboard screenshot includes drawing and keeps paused editing state");
+                }
                 using var input=new TextBox{Text="sample text"};Controls.Add(input);ActiveControl=input;var textCopy=new KeyEventArgs(Keys.Control|Keys.C);OnKey(this,textCopy);Check(!textCopy.Handled,"Ctrl+C in text field stays available for text copying");Controls.Remove(input);ActiveControl=play;
             }finally{if(previousClipboard!=null)Clipboard.SetDataObject(previousClipboard,true,5,100);else Clipboard.Clear();}
             inkCanvas.SelectTool(DrawingTool.Eraser);inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
@@ -245,6 +270,29 @@ public sealed partial class PlayerForm
             Native.SendMessage(inkCanvas.Handle, 0x202, IntPtr.Zero, LocationParam(to));
         }
         void UndoDrawing() => OnKey(this, new KeyEventArgs(Keys.Control | Keys.Z));
+        void UseDialog(string title, Action open, Action<Form> interact)
+        {
+            Exception? failure = null;
+            bool handled = false;
+            using var watcher = new System.Windows.Forms.Timer { Interval = 30 };
+            watcher.Tick += (_, _) =>
+            {
+                var dialog = Application.OpenForms.Cast<Form>().FirstOrDefault(form => form != this && form.Visible);
+                if (dialog == null) return;
+                watcher.Stop();
+                try
+                {
+                    if (dialog.Text != title) throw new InvalidOperationException($"Unexpected dialog: {dialog.Text}");
+                    interact(dialog);
+                    handled = true;
+                }
+                catch (Exception ex) { failure = ex; dialog.Close(); }
+            };
+            watcher.Start();
+            open();
+            if (failure != null) throw new InvalidOperationException("Could not use annotation dialog.", failure);
+            check(handled, $"{title} opens with the requested controls");
+        }
         bool ContainsInk(Rectangle area)
         {
             using var capture = new Bitmap(640, 360);
@@ -315,11 +363,66 @@ public sealed partial class PlayerForm
         UndoDrawing();
         check(!inkCanvas.HasInk, "Ctrl+Z removes the whole arrow");
 
+        var colorPoint = new PointF(.5f, .5f);
+        using (var frame = CaptureFrame(includeInk: false))
+        {
+            Color expected = frame.GetPixel(frame.Width / 2, frame.Height / 2);
+            inkCanvas.PenColor = Color.FromArgb(255 - expected.R, 255 - expected.G, 255 - expected.B);
+            void ChooseEyedropper() => UseDialog("그림 색상", PickInkColor,
+                dialog => dialog.Controls.OfType<Button>().Single(button => button.Text == "스포이드").PerformClick());
+            ChooseEyedropper();
+            check(inkCanvas.PickingColor, "eyedropper waits for a click on the video");
+            Drag(colorPoint, colorPoint);
+            check(inkCanvas.PenColor.ToArgb() == expected.ToArgb() && !inkCanvas.PickingColor && !inkCanvas.HasInk,
+                "eyedropper uses the clicked video pixel without leaving a stroke");
+            ChooseEyedropper();
+            var cancel = new KeyEventArgs(Keys.Escape);
+            OnKey(this, cancel);
+            check(cancel.Handled && !inkCanvas.PickingColor && inkCanvas.PenColor.ToArgb() == expected.ToArgb(), "Escape cancels the eyedropper");
+        }
+
         SelectDrawingTool(DrawingTool.Text);
-        inkCanvas.AddText("한글 Test", new PointF(.2f, .25f));
+        inkCanvas.PenColor = Color.Magenta;
+        var textOrigin = new PointF(.2f, .25f);
+        UseDialog("영상에 텍스트 추가", () => Drag(textOrigin, textOrigin), dialog =>
+        {
+            dialog.Controls.OfType<TextBox>().Single().Text = "한글 Test";
+            dialog.Controls.OfType<NumericUpDown>().Single().Value = 32;
+            ((Button)dialog.AcceptButton!).PerformClick();
+        });
+        check(inkCanvas.TextSize == 32, "insertion dialog applies the chosen font size");
         var sourceText = new Rectangle(128, 88, 112, 28);
         var movedText = new Rectangle(320, 192, 112, 35);
         check(ContainsInk(sourceText), "text is composited into captured frames");
+        PointF ResizeHandleAt(int size)
+        {
+            using var frame = new Bitmap(640, 360);
+            using var g = Graphics.FromImage(frame);
+            using var font = new Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel);
+            var extents = g.MeasureString("한글 Test", font, new SizeF(512, 356));
+            return new PointF(textOrigin.X + (extents.Width + 2) / 640 - 4f / inkCanvas.Width,
+                textOrigin.Y + (extents.Height + 2) / 360 - 4f / inkCanvas.Height);
+        }
+        var handle = ResizeHandleAt(32);
+        var grown = new PointF(handle.X + .11f, handle.Y + .07f);
+        Drag(handle, grown);
+        int grownSize = inkCanvas.TextSize;
+        check(grownSize > 32 && ContainsInk(new Rectangle(128, 125, 230, 25)), "dragging the resize corner increases the rendered text size");
+        var largerHandle = ResizeHandleAt(grownSize);
+        Drag(largerHandle, new PointF(largerHandle.X - .09f, largerHandle.Y - .05f));
+        check(inkCanvas.TextSize < grownSize, "dragging the resize corner inward reduces text size");
+        UndoDrawing();
+        UndoDrawing();
+        check(!ContainsInk(new Rectangle(128, 130, 230, 20)), "Ctrl+Z restores the original text size");
+        Drag(new PointF(.225f, .27f), new PointF(.225f, .27f));
+        check(inkCanvas.TextSize == 32, "selecting a text box shows its original size");
+        UseDialog("텍스트 크기", () => ShowInkTextSettings(), dialog =>
+        {
+            dialog.Controls.OfType<NumericUpDown>().Single().Value = 18;
+            ((Button)dialog.AcceptButton!).PerformClick();
+        });
+        check(inkCanvas.TextSize == 18, "exact size can be set on selected text");
+        UndoDrawing();
         Drag(new PointF(.225f, .27f), new PointF(.525f, .57f));
         check(!ContainsInk(sourceText) && ContainsInk(movedText), "text box moves by dragging");
         UndoDrawing();

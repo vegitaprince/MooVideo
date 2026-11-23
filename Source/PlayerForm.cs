@@ -249,6 +249,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     void SetUpdatingDisplay(bool updating){video.Updating=updating;startupDefaults.Visible=video.Empty&&!playbackStarted&&!updating;video.Invalidate();}
     void OnKey(object? s,KeyEventArgs e)
     {
+        if (e.KeyCode == Keys.Escape && CancelInkColorPick()) { e.Handled = e.SuppressKeyPress = true; return; }
         if(ActiveControl is TextBoxBase||ActiveControl is NumericUpDown)return;
         bool done=true;Safe(()=>{switch(e.KeyCode){case Keys.O:if(e.Control&&e.Shift)ChooseFolder();else if(e.Control)OpenFiles();else done=false;break;case Keys.Space:TogglePlay();break;case Keys.D:ToggleInk();break;case Keys.Z:if(e.Control&&inkMode)inkCanvas.Undo();else done=false;break;case Keys.PageUp:Next(-1);break;case Keys.PageDown:Next(1);break;case Keys.Left:if(e.Control)Next(-1);else SeekBy(e.Shift?-10:-5);break;case Keys.Right:if(e.Control)Next(1);else SeekBy(e.Shift?10:5);break;case Keys.Up:ChangeVolume(e.Shift?10:5);break;case Keys.Down:ChangeVolume(e.Shift?-10:-5);break;case Keys.Oemcomma:Frame(-1);break;case Keys.OemPeriod:Frame(1);break;case Keys.M:player?.Command("cycle","mute");break;case Keys.F11:case Keys.F:Fullscreen();break;case Keys.D0:if(e.Control)OriginalWindowSize();else done=false;break;case Keys.Escape:if(full)Fullscreen();else if(side.Visible)ToggleSide(sideMode);break;case Keys.P:ToggleSide("playlist");break;case Keys.E:ToggleSide("edit");break;case Keys.I:ToggleSide("info");break;case Keys.S:Screenshot();break;case Keys.C:if(e.Control)CopyScreenshot();else done=false;break;case Keys.Home:player?.Seek(0);break;case Keys.OemOpenBrackets:markIn=position;status.Text="시작점 지정: "+Clock(position);break;case Keys.OemCloseBrackets:markOut=position;status.Text="끝점 지정: "+Clock(position);break;default:done=false;break;}});if(done){e.Handled=true;e.SuppressKeyPress=true;}
     }
@@ -270,7 +271,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     public void Wheel(int delta,Point p)
     {
         if(delta==0)return;if(p.X<video.Right/2){ChangeVolume(Math.Sign(delta)*2);volumeFeedbackUntil=DateTime.UtcNow.AddMilliseconds(1300);lastPointerMove=DateTime.UtcNow;UpdateChromeVisibility(p);ShowVolumeFlyout();return;}if(current==null)return;
-        ClearAnnotations();var now=DateTime.UtcNow;var gap=(now-lastWheel).TotalMilliseconds;var direction=Math.Sign(delta);wheelBurst=gap<150&&direction==lastDirection?wheelBurst+1:1;lastWheel=now;lastDirection=direction;
+        ClearAnnotations();var now=DateTime.UtcNow;var gap=(now-lastWheel).TotalMilliseconds;var direction=-Math.Sign(delta);wheelBurst=gap<150&&direction==lastDirection?wheelBurst+1:1;lastWheel=now;lastDirection=direction;
         if(!shuttle)shuttleResume=!player!.Flag("pause");shuttle=true;player!.Set("pause","yes");
         if(wheelBurst<3){player.Command(direction>0?"frame-step":"frame-back-step");status.Text=direction>0?"다음 프레임":"이전 프레임";}
         else{double rate=Math.Clamp(wheelBurst*0.65,2,16);double seconds=Math.Max(1/Math.Max(1,info?.Fps??30),Math.Clamp(gap/1000,0.015,0.15)*rate);player.Seek(direction*seconds,true);status.Text=$"{(direction>0?"앞으로":"뒤로")} {rate:0.#}× 탐색";}

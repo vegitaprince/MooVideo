@@ -1,10 +1,16 @@
-# MooVideo 0.6.2
+# MooVideo 0.6.3
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
-[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.2/MooVideo-0.6.2-win-x64.zip)
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.3/MooVideo-0.6.3-win-x64.zip)
 
 ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
+## 0.6.3 변경 사항
+
+- 텍스트를 넣을 때 글자 크기를 픽셀 단위로 선택할 수 있습니다. 이미 넣은 텍스트는 선택한 뒤 오른쪽 아래 모서리를 드래그하거나 도구 모음의 숫자 버튼으로 크기를 바꿀 수 있습니다. Ctrl+Z로 크기 변경을 되돌릴 수 있습니다.
+- 그림 색상 창에서 **스포이드**를 누른 뒤 영상의 원하는 지점을 클릭하면 해당 픽셀의 색을 가져옵니다. Esc로 취소할 수 있습니다.
+- 영상 오른쪽에서 휠을 위로 돌리면 이전 프레임, 아래로 돌리면 다음 프레임으로 이동합니다. 빠르게 돌릴 때도 같은 방향으로 탐색합니다.
 
 ## 0.6.2 변경 사항
 

@@ -7,6 +7,7 @@ sealed class InkColorPicker : Form
     readonly ColorWheel wheel;
 
     internal Color SelectedColor => wheel.SelectedColor;
+    internal bool PickFromVideo { get; private set; }
 
     internal InkColorPicker(Color initial)
     {
@@ -35,15 +36,17 @@ sealed class InkColorPicker : Form
         brightness.ValueChanged += (_, _) => wheel.SetBrightness(brightness.Value / 100f);
         brightness.MouseWheel += (_, e) => { if (e is HandledMouseEventArgs handled) handled.Handled = true; brightness.Value = Math.Clamp(brightness.Value + Math.Sign(e.Delta) * 5, 0, 100); };
 
-        var ok = new Button { Text = "적용", DialogResult = DialogResult.OK, Bounds = new Rectangle(83, 282, 80, 32) };
-        var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(171, 282, 80, 32) };
-        foreach (var button in new[] { ok, cancel })
+        var eyedropper = new Button { Text = "스포이드", Bounds = new Rectangle(16, 282, 76, 32) };
+        eyedropper.Click += (_, _) => { PickFromVideo = true; DialogResult = DialogResult.OK; };
+        var ok = new Button { Text = "적용", DialogResult = DialogResult.OK, Bounds = new Rectangle(98, 282, 74, 32) };
+        var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(178, 282, 74, 32) };
+        foreach (var button in new[] { eyedropper, ok, cancel })
         {
             button.FlatStyle = FlatStyle.Flat;
             button.BackColor = Theme.Field;
             button.ForeColor = Theme.Text;
         }
-        Controls.AddRange([wheel, brightnessLabel, brightness, swatch, ok, cancel]);
+        Controls.AddRange([wheel, brightnessLabel, brightness, swatch, eyedropper, ok, cancel]);
         AcceptButton = ok;
         CancelButton = cancel;
     }
