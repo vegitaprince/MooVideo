@@ -139,6 +139,7 @@ public sealed partial class PlayerForm
             ToggleSide("playlist");UpdateChromeVisibility(new Point(ClientSize.Width-20,40));Check(side.Visible&&bottom.Visible,"fullscreen sidebar stays open while in use");Fullscreen();ToggleSide("playlist");Check(!full,"fullscreen exits");
             player!.Set("pause","yes");player.Seek(2);await Task.Delay(250);ToggleInk();await Task.Delay(150);
             Check(inkMode&&inkCanvas.Visible&&inkTools.Visible&&player.Flag("pause"),"drawing opens only on paused frame");
+            await RunAnnotationSmoke(Check);
             inkCanvas.PenColor=Color.Red;inkCanvas.PenSize=2;inkCanvas.Stroke(new PointF(.25f,.3f),new PointF(.75f,.3f));
             var inkPosition=player.Number("time-pos");
             foreach(var target in new Control[]{seekHit,seek})foreach(int y in new[]{1,target.Height/2,target.Height-2}){
@@ -155,9 +156,9 @@ public sealed partial class PlayerForm
                 using var bitmap=new Bitmap(copied!);var color=bitmap.GetPixel(bitmap.Width/2,(int)(bitmap.Height*.3));Check(color.R>230&&color.G<30&&color.B<30&&inkMode&&player.Flag("pause"),"clipboard screenshot includes drawing and keeps paused editing state");
                 using var input=new TextBox{Text="sample text"};Controls.Add(input);ActiveControl=input;var textCopy=new KeyEventArgs(Keys.Control|Keys.C);OnKey(this,textCopy);Check(!textCopy.Handled,"Ctrl+C in text field stays available for text copying");Controls.Remove(input);ActiveControl=play;
             }finally{if(previousClipboard!=null)Clipboard.SetDataObject(previousClipboard,true,5,100);else Clipboard.Clear();}
-            inkCanvas.Erasing=true;inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
+            inkCanvas.SelectTool(DrawingTool.Eraser);inkCanvas.EraserSize=2;inkCanvas.Stroke(new PointF(.4f,.3f),new PointF(.6f,.3f));SaveFrame(Path.Combine(resultDir,"erased.png"));
             using(var saved=new Bitmap(Path.Combine(resultDir,"erased.png")))Check(saved.GetPixel(saved.Width/2,(int)(saved.Height*.3)).ToArgb()!=Color.Red.ToArgb(),"eraser removes drawn ink without erasing video");
-            inkCanvas.Erasing=false;inkCanvas.Stroke(new PointF(.2f,.55f),new PointF(.7f,.7f));
+            inkCanvas.SelectTool(DrawingTool.Pen);inkCanvas.Stroke(new PointF(.2f,.55f),new PointF(.7f,.7f));
             TopMost=true;Activate();timer.Stop();UpdateChromeVisibility(new Point(100,100));await Task.Delay(200);
             using(var capture=new Bitmap(Width,Height)){using var g=Graphics.FromImage(capture);g.CopyFromScreen(Location,Point.Empty,Size);capture.Save(Path.Combine(resultDir,"drawing-0.5.3.png"));}TopMost=false;timer.Start();
             Native.SendMessage(play.Handle,0x201,(IntPtr)1,(IntPtr)(10|(10<<16)));Native.SendMessage(play.Handle,0x202,IntPtr.Zero,(IntPtr)(10|(10<<16)));await Task.Delay(150);Check(!player.Flag("pause")&&!inkMode&&!inkCanvas.HasInk&&!inkTools.Visible&&seek.DragAllowed,"play button still resumes and unlocks seek after drawing");
@@ -172,5 +173,84 @@ public sealed partial class PlayerForm
             await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks.Append("ALL PASSED"));
         }catch(Exception ex){checks.Add("FAIL "+ex);await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks);}
         Close();
+    }
+
+    async Task RunAnnotationSmoke(Action<bool, string> check)
+    {
+        void Drag(PointF from, PointF to)
+        {
+            IntPtr LocationParam(PointF location) => (IntPtr)(((int)(inkCanvas.Height * location.Y) << 16) | (int)(inkCanvas.Width * location.X));
+            Native.SendMessage(inkCanvas.Handle, 0x201, (IntPtr)1, LocationParam(from));
+            Native.SendMessage(inkCanvas.Handle, 0x200, (IntPtr)1, LocationParam(to));
+            Native.SendMessage(inkCanvas.Handle, 0x202, IntPtr.Zero, LocationParam(to));
+        }
+        void UndoDrawing() => OnKey(this, new KeyEventArgs(Keys.Control | Keys.Z));
+        bool ContainsInk(Rectangle area)
+        {
+            using var capture = new Bitmap(640, 360);
+            using (var g = Graphics.FromImage(capture)) inkCanvas.Composite(g, capture.Size);
+            for (int y = area.Top; y < area.Bottom; y++)
+                for (int x = area.Left; x < area.Right; x++)
+                    if (capture.GetPixel(x, y).A > 128) return true;
+            return false;
+        }
+        Color ScreenPixel(PointF location)
+        {
+            var point = inkCanvas.PointToScreen(new Point((int)(location.X * inkCanvas.Width), (int)(location.Y * inkCanvas.Height)));
+            using var sample = new Bitmap(1, 1);
+            using (var g = Graphics.FromImage(sample)) g.CopyFromScreen(point, Point.Empty, sample.Size);
+            return sample.GetPixel(0, 0);
+        }
+
+        SelectDrawingTool(DrawingTool.Pen);
+        inkCanvas.PenColor = Color.Magenta;
+        SetInkWidth(2);
+        SelectDrawingTool(DrawingTool.Eraser);
+        SetInkWidth(0);
+        SelectDrawingTool(DrawingTool.Pen);
+        var saved = Preferences.Load();
+        check(inkCanvas.PenSize == 2 && inkCanvas.EraserSize == 0 && saved.DrawingPenSize == 2 && saved.DrawingEraserSize == 0,
+            "pen and eraser widths persist independently");
+
+        TopMost = true;
+        Activate();
+        await Task.Delay(200);
+        var samplePoint = new PointF(.40f, .46f);
+        var original = ScreenPixel(samplePoint);
+        Drag(new PointF(.2f, .46f), new PointF(.65f, .46f));
+        await Task.Delay(150);
+        var withStroke = ScreenPixel(samplePoint);
+        inkCanvas.ClearDrawing();
+        await Task.Delay(150);
+        check(withStroke.ToArgb() != original.ToArgb() && ScreenPixel(samplePoint).ToArgb() == original.ToArgb(),
+            "clear immediately removes ink from the visible overlay");
+        Drag(new PointF(.2f, .62f), new PointF(.65f, .62f));
+        check(ScreenPixel(samplePoint).ToArgb() == original.ToArgb(), "drawing again does not restore cleared pixels");
+        TopMost = false;
+        UndoDrawing();
+        check(!inkCanvas.HasInk, "Ctrl+Z removes a complete stroke");
+        UndoDrawing();
+        check(ContainsInk(new Rectangle(200, 155, 100, 20)), "Ctrl+Z can deliberately undo clear");
+        inkCanvas.ClearDrawing();
+
+        SelectDrawingTool(DrawingTool.Arrow);
+        Drag(new PointF(.2f, .35f), new PointF(.7f, .35f));
+        check(ContainsInk(new Rectangle(411, 106, 24, 17)) && ContainsInk(new Rectangle(220, 120, 100, 12)),
+            "drag creates an arrow shaft and head");
+        UndoDrawing();
+        check(!inkCanvas.HasInk, "Ctrl+Z removes the whole arrow");
+
+        SelectDrawingTool(DrawingTool.Text);
+        inkCanvas.AddText("한글 Test", new PointF(.2f, .25f));
+        var sourceText = new Rectangle(128, 88, 112, 28);
+        var movedText = new Rectangle(320, 192, 112, 35);
+        check(ContainsInk(sourceText), "text is composited into captured frames");
+        Drag(new PointF(.225f, .27f), new PointF(.525f, .57f));
+        check(!ContainsInk(sourceText) && ContainsInk(movedText), "text box moves by dragging");
+        UndoDrawing();
+        check(ContainsInk(sourceText) && !ContainsInk(movedText), "Ctrl+Z restores the text box position");
+        UndoDrawing();
+        check(!inkCanvas.HasInk, "Ctrl+Z removes added text");
+        SelectDrawingTool(DrawingTool.Pen);
     }
 }

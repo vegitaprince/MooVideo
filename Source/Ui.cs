@@ -12,6 +12,7 @@ static class Theme
 sealed class ToolButton:Control
 {
     public string Glyph=""; public bool Selected; public bool Primary; bool hover;
+    internal Action<Graphics,Rectangle>? DrawContent;
     public ToolButton(string glyph,string label,Action action,bool primary=false)
     {
         Glyph=glyph; AccessibleName=label; AccessibleRole=AccessibleRole.PushButton; Text=label; Primary=primary; Cursor=Cursors.Hand; Size=new(36,34); TabStop=true;
@@ -26,7 +27,8 @@ sealed class ToolButton:Control
         g.FillRoundedRectangle(bg,new Rectangle(1,1,Width-2,Height-2),new Size(8,8));
         var c=!Enabled?Theme.Muted:Theme.Text;
         using var font=new Font("Segoe Fluent Icons",14); using var text=Theme.Font(9);
-        Theme.DrawText(g,Glyph.Length>0?Glyph:Text,Glyph.Length>0?font:text,c,ClientRectangle,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|(Glyph.Length>0?TextFormatFlags.NoPadding:TextFormatFlags.EndEllipsis));
+        if(DrawContent!=null)DrawContent(g,ClientRectangle);
+        else Theme.DrawText(g,Glyph.Length>0?Glyph:Text,Glyph.Length>0?font:text,c,ClientRectangle,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|(Glyph.Length>0?TextFormatFlags.NoPadding:TextFormatFlags.EndEllipsis));
         if(Focused) {using var p=new Pen(Theme.Accent,2);g.DrawRectangle(p,3,3,Width-7,Height-7);}
     }
 }

@@ -1,10 +1,18 @@
-# MooVideo 0.5.9
+# MooVideo 0.6.0
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
-[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.5.9/MooVideo-0.5.9-win-x64.zip)
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.0/MooVideo-0.6.0-win-x64.zip)
 
 ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
+## 0.6.0 변경 사항
+
+- 그림 비우기가 화면에 즉시 반영됩니다. Ctrl+Z 또는 실행 취소 버튼으로 획, 지우기, 화살표, 텍스트 추가·이동, 비우기를 되돌릴 수 있습니다.
+- 색상 버튼은 현재 색을 원으로 표시합니다. 색상환에서 색을 고르고 밝기 슬라이더로 조절할 수 있습니다.
+- 굵기 버튼과 메뉴는 선으로 굵기를 표시합니다. 펜과 지우개 굵기는 각자 저장되고 다음 실행에도 복원됩니다.
+- T 버튼을 누른 뒤 영상에서 클릭해 텍스트를 추가하세요. 텍스트 도구가 선택된 상태에서 글 상자를 끌어 이동할 수 있습니다.
+- 화살표 버튼을 누른 뒤 영상에서 시작점부터 끝점까지 드래그하세요. 텍스트와 화살표는 PNG 저장과 클립보드 복사에 포함됩니다.
 
 ## 0.5.9 변경 사항
 

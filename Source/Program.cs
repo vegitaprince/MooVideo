@@ -16,6 +16,8 @@ public sealed class Preferences
 {
     public double Volume { get; set; } = 65;
     public int ThumbnailSize { get; set; } = 136;
+    public int DrawingPenSize { get; set; } = 1;
+    public int DrawingEraserSize { get; set; } = 1;
     public DateTime LastUpdateCheckUtc { get; set; } = DateTime.MinValue;
     public string Folder { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
     public List<string> Playlist { get; set; } = new();
