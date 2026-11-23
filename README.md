@@ -1,10 +1,15 @@
-# MooVideo 0.5.8
+# MooVideo 0.5.9
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
-[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.5.8/MooVideo-0.5.8-win-x64.zip)
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.5.9/MooVideo-0.5.9-win-x64.zip)
 
 ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
+## 0.5.9 변경 사항
+
+- 동영상 파일을 더블클릭하면 첫 화면 없이 바로 재생합니다. 업데이트 확인은 영상 로딩이 끝난 뒤 시작합니다.
+- 앱을 단독으로 실행하면 기존 첫 화면이 표시됩니다.
 
 ## 0.5.8 변경 사항
 

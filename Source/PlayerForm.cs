@@ -24,10 +24,16 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     double position,duration,markIn=-1,markOut=-1; int index=-1; bool eofHandled,shuttle,full,shuttleResume,sideOpen; string repeat="off"; Point? videoDown,lastPointer;
     DateTime lastWheel=DateTime.MinValue,lastSave=DateTime.UtcNow,lastPointerMove=DateTime.MinValue,lastVolumeHover=DateTime.MinValue; int wheelBurst,lastDirection;
     Rectangle restoreBounds; FormWindowState restoreState; CancellationTokenSource? probeToken,updateToken; bool checkingUpdate; string sideMode="";
-    readonly string[] initialArgs; bool closing;
+    readonly string[] initialArgs;
+    readonly string[] startupFiles;
+    bool checkAfterStartupFile;
+    bool closing;
     public PlayerForm(string[] args)
     {
         initialArgs=args; Text="MooVideo";Name="MooVideo";BackColor=Theme.Bg;ForeColor=Theme.Text;Font=Theme.Font();
+        startupFiles = args.Where(File.Exists).ToArray();
+        video.Empty = startupFiles.Length == 0;
+        checkAfterStartupFile = startupFiles.Length > 0 && !args.Contains("--ui-smoke");
         AutoScaleMode=AutoScaleMode.Dpi; FormBorderStyle=FormBorderStyle.None;MinimumSize=new(320,180);Size=new(1360,840);StartPosition=FormStartPosition.CenterScreen;KeyPreview=true;AllowDrop=true;
         var ico=Path.Combine(AppContext.BaseDirectory,"MooVideo.ico");if(File.Exists(ico))Icon=new Icon(ico);
         Controls.Add(video);Controls.Add(topShade);Controls.Add(bottomShade); Controls.Add(side); Controls.Add(bottom); Controls.Add(header);Controls.Add(volumePopup);
@@ -88,12 +94,26 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     async void OnShown(object? sender,EventArgs e)
     {
         try{
-            player=new Mpv(video.Handle);player.Set("volume",Math.Clamp(prefs.Volume,0,100));player.Loaded+=OnLoaded;player.Failed+=m=>{video.Empty=true;video.Invalidate();Error(new Exception("파일을 재생할 수 없습니다.\n"+m));};
+            player = new Mpv(video.Handle);
+            player.Set("volume", Math.Clamp(prefs.Volume, 0, 100));
+            player.Loaded += OnLoaded;
+            player.Failed += message =>
+            {
+                video.Empty = startupFiles.Length == 0;
+                video.Invalidate();
+                Error(new Exception("파일을 재생할 수 없습니다.\n" + message));
+                CheckUpdatesAfterStartupFile();
+            };
             timer.Start();
-            if(!initialArgs.Contains("--ui-smoke"))await CheckForUpdates(false);
-            if(closing)return;
-            var paths=initialArgs.Where(File.Exists).ToArray();if(paths.Length>0)AddFiles(paths,true);
-            if(initialArgs.Contains("--ui-smoke"))await RunUiSmoke();
+            bool smokeTest = initialArgs.Contains("--ui-smoke");
+            if (smokeTest && startupFiles.Length > 0)
+                await RunFileStartupSmoke();
+            else if (startupFiles.Length > 0)
+                AddFiles(startupFiles, true);
+            else if (smokeTest)
+                await RunUiSmoke();
+            else
+                await CheckForUpdates(false);
         }catch(Exception ex){Error(new Exception("재생 엔진을 시작하지 못했습니다. 앱 폴더의 libmpv-2.dll을 확인하세요.\n"+ex.Message));}
     }
     void LayoutPlayer()
@@ -103,7 +123,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         bottom.SetBounds(0,ClientSize.Height-bh,ClientSize.Width,bh);header.SetBounds(0,0,ClientSize.Width-sw,th);
         topShade.SetBounds(0,0,video.Width,82);bottomShade.SetBounds(0,ClientSize.Height-bh-40,ClientSize.Width,bh+40);
         startupDefaults.SetBounds((video.Width-160)/2,video.WelcomeButtonTop,160,38);
-        startupDefaults.Visible=!playbackStarted&&!video.Updating;
+        startupDefaults.Visible=video.Empty&&!playbackStarted&&!video.Updating;
         startupDefaults.BringToFront();
         LayoutInk();inkCanvas.BringToFront();inkTools.BringToFront();
         topShade.BringToFront();bottomShade.BringToFront();bottom.BringToFront();seekHit.BringToFront();side.BringToFront();header.BringToFront();volumePopup.BringToFront();
@@ -156,6 +176,13 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         if(current!=null&&prefs.Positions.TryGetValue(current,out var p)&&p>3&&p<player!.Number("duration")-3)player.Seek(p);
         status.Text="재생 중";
         TrySizeFirstVideo();
+        CheckUpdatesAfterStartupFile();
+    }
+    void CheckUpdatesAfterStartupFile()
+    {
+        if (!checkAfterStartupFile || closing) return;
+        checkAfterStartupFile = false;
+        BeginInvoke(() => _ = CheckForUpdates(false));
     }
     void SyncEditMarkers(){bool editing=sideOpen&&sideMode=="edit";seek.MarkIn=editing?markIn:-1;seek.MarkOut=editing?markOut:-1;seek.Invalidate();}
     void TrySizeFirstVideo(){if(firstVideoSized||info==null)return;firstVideoSized=true;if(!full)SetVideoWindowScale(1);}
@@ -224,7 +251,8 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         checkingUpdate=true;
         try
         {
-            status.Text="업데이트를 확인하는 중…";if(!manual)title.Text="업데이트를 확인하는 중…";
+            if (manual || current == null) status.Text = "업데이트를 확인하는 중…";
+            if (!manual && current == null) title.Text = "업데이트를 확인하는 중…";
             var available=await Updates.CheckAsync();
             if(closing||exportBusy)return;
             prefs.LastUpdateCheckUtc=DateTime.UtcNow;
@@ -240,7 +268,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         catch(Exception ex){if(!closing)Error(new Exception("업데이트를 확인하거나 설치하지 못했습니다.\n"+ex.Message+"\n\n영상 우클릭 → 업데이트 확인에서 다시 시도할 수 있습니다."));}
         finally{if(!closing){SetUpdatingDisplay(false);Enabled=true;if(!manual)title.Text=current==null?"MooVideo":Path.GetFileName(current)+" · MooVideo";}checkingUpdate=false;updateToken?.Dispose();updateToken=null;}
     }
-    void SetUpdatingDisplay(bool updating){video.Updating=updating;startupDefaults.Visible=!playbackStarted&&!updating;video.Invalidate();}
+    void SetUpdatingDisplay(bool updating){video.Updating=updating;startupDefaults.Visible=video.Empty&&!playbackStarted&&!updating;video.Invalidate();}
     void OnKey(object? s,KeyEventArgs e)
     {
         if(ActiveControl is TextBoxBase||ActiveControl is NumericUpDown)return;

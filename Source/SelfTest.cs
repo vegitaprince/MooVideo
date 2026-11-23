@@ -55,6 +55,35 @@ static class SelfTest
 }
 public sealed partial class PlayerForm
 {
+    async Task RunFileStartupSmoke()
+    {
+        var resultDir = initialArgs[Array.IndexOf(initialArgs, "--ui-smoke") + 1];
+        var resultPath = Path.Combine(resultDir, "file-startup-results.txt");
+        try
+        {
+            if (video.Empty || startupDefaults.Visible)
+                throw new InvalidOperationException("Welcome screen was visible before loading the launch file.");
+            AddFiles(startupFiles, true);
+            var clock = Stopwatch.StartNew();
+            while (clock.Elapsed < TimeSpan.FromSeconds(8))
+            {
+                if (video.Empty || startupDefaults.Visible)
+                    throw new InvalidOperationException("Welcome screen appeared while loading the launch file.");
+                if (playbackStarted && position > 0 && player!.Number("video-params/w") > 0) break;
+                await Task.Delay(25);
+            }
+            if (!playbackStarted || position <= 0 || player!.Number("video-params/w") <= 0 || current != startupFiles[0])
+                throw new InvalidOperationException("The launch file did not play.");
+            await File.WriteAllTextAsync(resultPath, "PASS launch file played without the welcome screen\n");
+        }
+        catch (Exception ex)
+        {
+            await File.WriteAllTextAsync(resultPath, "FAIL " + ex);
+            Environment.ExitCode = 1;
+        }
+        Close();
+    }
+
     async Task RunUiSmoke()
     {
         var arg=Array.IndexOf(initialArgs,"--ui-smoke");var resultDir=initialArgs[arg+1];Directory.CreateDirectory(resultDir);var checks=new List<string>();
