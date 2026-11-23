@@ -6,6 +6,7 @@ using System.Text.Json;
 namespace MooVideo;
 
 internal sealed record AvailableUpdate(Version Version,string ZipUrl,string ChecksumUrl);
+internal sealed record PreparedUpdate(Version Version,string StageDirectory);
 
 internal static class Updates
 {
@@ -37,13 +38,40 @@ internal static class Updates
         return new(version,zip!,checksum!);
     }
 
-    internal static async Task DownloadAndStartAsync(AvailableUpdate update,IProgress<double> progress,CancellationToken token,string? reopen=null)
+    internal static Task<PreparedUpdate> PrepareAsync(AvailableUpdate update,IProgress<double> progress,CancellationToken token)
+        => Task.Run(() => PreparePackageAsync(update,progress,token),token);
+
+    static async Task<PreparedUpdate> PreparePackageAsync(AvailableUpdate update,IProgress<double> progress,CancellationToken token)
     {
         var stage=Path.Combine(Preferences.DataDirectory,"updates",update.Version.ToString(3)+"-"+Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
-        var checksum=(await Http.GetStringAsync(update.ChecksumUrl,token)).Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries)[0];
-        if(checksum.Length!=64||!checksum.All(Uri.IsHexDigit))throw new InvalidDataException("업데이트 검증 파일이 올바르지 않습니다.");
-        var zipPath=Path.Combine(stage,"update.zip");
+        try
+        {
+            var checksum=(await Http.GetStringAsync(update.ChecksumUrl,token)).Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if(checksum is not {Length:64}||!checksum.All(Uri.IsHexDigit))throw new InvalidDataException("업데이트 검증 파일이 올바르지 않습니다.");
+            var zipPath=Path.Combine(stage,"update.zip");
+            await DownloadPackageAsync(update,zipPath,progress,token);
+            await using(var file=File.OpenRead(zipPath))
+            {
+                var actual=Convert.ToHexString(await SHA256.HashDataAsync(file,token));
+                if(!actual.Equals(checksum,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("업데이트 파일의 검증 값이 일치하지 않습니다.");
+            }
+            await ExtractPackageAsync(update.Version,zipPath,Path.Combine(stage,"new-app"),token);
+            File.Delete(zipPath);
+            token.ThrowIfCancellationRequested();
+            File.Copy(Environment.ProcessPath!,Path.Combine(stage,"MooVideo-update-helper.exe"));
+            token.ThrowIfCancellationRequested();
+            return new(update.Version,stage);
+        }
+        catch
+        {
+            DiscardStage(stage);
+            throw;
+        }
+    }
+
+    static async Task DownloadPackageAsync(AvailableUpdate update,string zipPath,IProgress<double> progress,CancellationToken token)
+    {
         using(var response=await Http.GetAsync(update.ZipUrl,HttpCompletionOption.ResponseHeadersRead,token))
         {
             response.EnsureSuccessStatusCode();
@@ -57,15 +85,14 @@ internal static class Updates
                 received+=read;if(length>0)progress.Report((double)received/length);
             }
         }
-        await using(var file=File.OpenRead(zipPath))
-        {
-            var actual=Convert.ToHexString(await SHA256.HashDataAsync(file,token));
-            if(!actual.Equals(checksum,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("업데이트 파일의 검증 값이 일치하지 않습니다.");
-        }
-        var app=Path.Combine(stage,"new-app");Directory.CreateDirectory(app);
+    }
+
+    static async Task ExtractPackageAsync(Version version,string zipPath,string app,CancellationToken token)
+    {
+        Directory.CreateDirectory(app);
         using(var archive=ZipFile.OpenRead(zipPath))
         {
-            var prefix=$"MooVideo-{update.Version.ToString(3)}/App/";
+            var prefix=$"MooVideo-{version.ToString(3)}/App/";
             long total=0;
             foreach(var entry in archive.Entries)
             {
@@ -75,18 +102,28 @@ internal static class Updates
                 if(!destination.StartsWith(app+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("업데이트 압축 파일의 경로가 올바르지 않습니다.");
                 total+=entry.Length;if(total>1_000_000_000)throw new InvalidDataException("업데이트 파일이 너무 큽니다.");
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                entry.ExtractToFile(destination,true);
+                await using var source=entry.Open();
+                await using var target=File.Create(destination);
+                await source.CopyToAsync(target,token);
             }
         }
         if(!File.Exists(Path.Combine(app,"MooVideo.exe"))||!File.Exists(Path.Combine(app,"libmpv-2.dll")))
             throw new InvalidDataException("업데이트에 필요한 앱 파일이 없습니다.");
-        var helper=Path.Combine(stage,"MooVideo-update-helper.exe");
-        File.Copy(Environment.ProcessPath!,helper);
+    }
+
+    internal static void DiscardStage(string stage)
+    {
+        try{Directory.Delete(stage,true);}catch(IOException){}catch(UnauthorizedAccessException){}
+    }
+
+    internal static void StartInstallation(PreparedUpdate update,string? reopen)
+    {
+        var helper=Path.Combine(update.StageDirectory,"MooVideo-update-helper.exe");
         var process=new ProcessStartInfo(helper){UseShellExecute=false,CreateNoWindow=true};
         process.ArgumentList.Add("--apply-update");process.ArgumentList.Add(Environment.ProcessId.ToString());
-        process.ArgumentList.Add(app);process.ArgumentList.Add(AppContext.BaseDirectory);
+        process.ArgumentList.Add(Path.Combine(update.StageDirectory,"new-app"));process.ArgumentList.Add(AppContext.BaseDirectory);
         if(reopen!=null)process.ArgumentList.Add(reopen);
-        Process.Start(process);
+        using var installer=Process.Start(process)??throw new InvalidOperationException("업데이트 설치 프로그램을 시작하지 못했습니다.");
     }
 
     internal static int Apply(string[] args)

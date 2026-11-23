@@ -1,10 +1,15 @@
-# MooVideo 0.6.0
+# MooVideo 0.6.1
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
-[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.0/MooVideo-0.6.0-win-x64.zip)
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.1/MooVideo-0.6.1-win-x64.zip)
 
 ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
+## 0.6.1 변경 사항
+
+- 업데이트를 다운로드하고 검증하는 동안에도 영상을 재생하고 조작할 수 있습니다. 설치 준비가 끝나면 팝업이 열리고, **설치 및 재시작**을 누를 때만 앱을 닫고 적용합니다.
+- **나중에**를 눌러 계속 시청할 수 있습니다. 같은 실행 중에는 **업데이트 확인**에서 준비된 업데이트를 다시 열 수 있습니다.
 
 ## 0.6.0 변경 사항
 
@@ -86,8 +91,8 @@ ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
 
 ## 업데이트와 기본 앱
 
-- 앱을 실행할 때마다 [GitHub Releases](https://github.com/vegitaprince/MooVideo/releases)의 새 안정 버전을 확인합니다. 새 버전이 있으면 팝업으로 설치 여부를 묻습니다. 예를 누르면 다운로드·검증 후 재시작하여 적용합니다. 아니요를 누르면 현재 버전으로 계속 실행합니다. 영상 우클릭 메뉴나 정보 패널의 **업데이트 확인** 버튼으로 직접 확인할 수도 있습니다.
-- 배포 ZIP과 SHA-256 검증 파일을 내려받고, 해시를 확인한 뒤 앱을 다시 시작하여 설치합니다. 업데이트하는 동안 App 폴더를 옮기지 마세요. 앱 폴더에 쓰기 권한이 필요합니다.
+- 앱을 실행할 때마다 [GitHub Releases](https://github.com/vegitaprince/MooVideo/releases)의 새 안정 버전을 확인합니다. 새 버전은 백그라운드에서 다운로드하고 SHA-256 해시를 검증합니다. 설치 준비가 끝나면 **설치 및 재시작** 또는 **나중에**를 선택할 수 있습니다. 영상 우클릭 메뉴나 정보 패널의 **업데이트 확인** 버튼으로도 열 수 있습니다.
+- 설치하는 동안 App 폴더를 옮기지 마세요. 앱 폴더에 쓰기 권한이 필요합니다.
 - 영상 우클릭 메뉴나 정보 패널의 **영상 기본 앱 설정**을 누르면 현재 MooVideo 실행 경로를 Windows에 등록하고, MooVideo의 기본 앱 설정 화면을 엽니다. MP4/MOV/MKV 등 원하는 확장자를 Windows에서 선택하세요. 기존 기본 앱을 앱이 강제로 변경하지 않습니다. 앱 폴더를 옮긴 뒤에는 다시 등록해야 합니다.
 - HAP·Notch는 코덱이므로 별도의 파일 확장자가 아닙니다. Windows 탐색기에 해당 영상의 썸네일이 없으면 파일 아이콘이 보일 수 있지만 MooVideo 재생 지원에는 영향이 없습니다.
 

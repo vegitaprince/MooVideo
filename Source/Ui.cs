@@ -160,6 +160,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc p,IntPtr param);
     public delegate bool EnumProc(IntPtr h,IntPtr p);
     [DllImport("user32.dll")] public static extern bool EnableWindow(IntPtr h,bool enable);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,int m,IntPtr w,IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();

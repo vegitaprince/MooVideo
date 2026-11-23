@@ -59,6 +59,12 @@ public sealed partial class PlayerForm
     {
         var resultDir = initialArgs[Array.IndexOf(initialArgs, "--ui-smoke") + 1];
         var resultPath = Path.Combine(resultDir, "file-startup-results.txt");
+        var checks = new List<string>();
+        void Check(bool passed, string name)
+        {
+            if (!passed) throw new InvalidOperationException(name);
+            checks.Add("PASS " + name);
+        }
         try
         {
             if (video.Empty || startupDefaults.Visible)
@@ -74,11 +80,13 @@ public sealed partial class PlayerForm
             }
             if (!playbackStarted || position <= 0 || player!.Number("video-params/w") <= 0 || current != startupFiles[0])
                 throw new InvalidOperationException("The launch file did not play.");
-            await File.WriteAllTextAsync(resultPath, "PASS launch file played without the welcome screen\n");
+            checks.Add("PASS launch file played without the welcome screen");
+            await RunUpdateSmoke(Check);
+            await File.WriteAllLinesAsync(resultPath, checks.Append("ALL PASSED"));
         }
         catch (Exception ex)
         {
-            await File.WriteAllTextAsync(resultPath, "FAIL " + ex);
+            await File.WriteAllLinesAsync(resultPath, checks.Append("FAIL " + ex));
             Environment.ExitCode = 1;
         }
         Close();
@@ -173,6 +181,58 @@ public sealed partial class PlayerForm
             await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks.Append("ALL PASSED"));
         }catch(Exception ex){checks.Add("FAIL "+ex);await File.WriteAllLinesAsync(Path.Combine(resultDir,"ui-results.txt"),checks);}
         Close();
+    }
+
+    async Task RunUpdateSmoke(Action<bool, string> check)
+    {
+        TopMost = true;
+        Activate();
+        var media = player!;
+        media.Seek(0);
+        media.Set("pause", "no");
+        var available = new AvailableUpdate(new Version(99, 0, 0), "", "");
+        var download = new TaskCompletionSource<PreparedUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stage = Path.Combine(Preferences.DataDirectory, "update-ui-smoke-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stage);
+        int preparations = 0;
+        Task<AvailableUpdate?> CheckAvailable(CancellationToken token) => Task.FromResult<AvailableUpdate?>(available);
+        Task<PreparedUpdate> Prepare(AvailableUpdate update, IProgress<double> progress, CancellationToken token)
+        {
+            preparations++;
+            progress.Report(.5);
+            return download.Task.WaitAsync(token);
+        }
+
+        var runningUpdate = CheckForUpdates(false, CheckAvailable, Prepare);
+        await Task.Delay(300);
+        check(Enabled && !video.Empty && video.Updating && updatePrompt == null && status.Text.Contains("50%")
+            && media.Number("time-pos") > .1, "video continues playing while the update downloads, without a prompt");
+        OnKey(this, new KeyEventArgs(Keys.Space));
+        await Task.Delay(100);
+        check(media.Flag("pause"), "playback controls work while the update downloads");
+
+        exportBusy = true;
+        download.SetResult(new PreparedUpdate(available.Version, stage));
+        await runningUpdate;
+        await Task.Delay(100);
+        check(preparedUpdate != null && updatePrompt == null && !video.Updating, "ready update waits for an active export");
+        var focusedWindow = Native.GetForegroundWindow();
+        exportBusy = false;
+        await Task.Delay(250);
+        check(updatePrompt is { Visible: true } && Enabled && !closing && Native.IsWindowEnabled(Handle),
+            "installation prompt appears after preparation without disabling the player");
+        check(Native.GetForegroundWindow() == focusedWindow, "installation prompt does not take focus");
+        OnKey(this, new KeyEventArgs(Keys.Space));
+        await Task.Delay(100);
+        check(!media.Flag("pause"), "playback controls work while installation is offered");
+        ((Button)updatePrompt!.CancelButton!).PerformClick();
+        await Task.Delay(150);
+        check(updatePrompt == null && Directory.Exists(stage) && !closing, "choosing Later keeps the update staged and the player open");
+        await CheckForUpdates(true, CheckAvailable, Prepare);
+        await Task.Delay(200);
+        check(updatePrompt is { Visible: true } && preparations == 1, "manual update check offers the staged package without downloading again");
+        updatePrompt!.Close();
+        TopMost = false;
     }
 
     async Task RunAnnotationSmoke(Action<bool, string> check)

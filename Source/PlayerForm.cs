@@ -23,7 +23,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     readonly List<string> playlist=new(); Mpv? player; string? current; MediaInfo? info;
     double position,duration,markIn=-1,markOut=-1; int index=-1; bool eofHandled,shuttle,full,shuttleResume,sideOpen; string repeat="off"; Point? videoDown,lastPointer;
     DateTime lastWheel=DateTime.MinValue,lastSave=DateTime.UtcNow,lastPointerMove=DateTime.MinValue,lastVolumeHover=DateTime.MinValue; int wheelBurst,lastDirection;
-    Rectangle restoreBounds; FormWindowState restoreState; CancellationTokenSource? probeToken,updateToken; bool checkingUpdate; string sideMode="";
+    Rectangle restoreBounds; FormWindowState restoreState; CancellationTokenSource? probeToken; string sideMode="";
     readonly string[] initialArgs;
     readonly string[] startupFiles;
     bool checkAfterStartupFile;
@@ -166,6 +166,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         time.Text=ClientSize.Width<600?Clock(position):$"{Clock(position)} / {Clock(duration)}";UpdateControls();
         if(current!=null&&!shuttle&&player.Flag("eof-reached")&&!eofHandled){eofHandled=true;if(repeat=="one"){player.Seek(0);player.Set("pause","no");eofHandled=false;}else if(index+1<playlist.Count||repeat=="all")Next(1);}
         if((DateTime.UtcNow-lastSave).TotalSeconds>15){Remember();prefs.Save();lastSave=DateTime.UtcNow;}
+        OfferPreparedUpdate();
     }
     void UpdateControls(){if(player==null)return;play.Glyph=player.Flag("pause")||current==null?"\uE768":"\uE769";play.Invalidate();volume.Glyph=player.Flag("mute")?"\uE74F":"\uE767";volume.Invalidate();volumeState.Text=player.Flag("mute")?"MUTE":$"{player.Number("volume"):0}%";if(!volumeSlider.Dragging)volumeSlider.Level=(int)Math.Round(player.Number("volume"));speed.Text=$"{player.Number("speed",1):0.##}×";speed.Invalidate();}
     public static string Clock(double t)=>t>=3600?TimeSpan.FromSeconds(Math.Max(0,t)).ToString(@"hh\:mm\:ss"):TimeSpan.FromSeconds(Math.Max(0,t)).ToString(@"mm\:ss");
@@ -245,29 +246,6 @@ public sealed partial class PlayerForm:Form,IMessageFilter
         m.Show(Cursor.Position);
     }
     void ShowContext(){var m=Menu();m.Items.Add("파일 열기",null,(_,_)=>OpenFiles());m.Items.Add("재생 / 일시정지",null,(_,_)=>TogglePlay());m.Items.Add("화면에 맞춤",null,(_,_)=>{player?.Set("video-unscaled","no");player?.Set("panscan",0);player?.Set("video-zoom",0);});m.Items.Add("화면 채우기",null,(_,_)=>player?.Set("panscan",1));m.Items.Add("원본 크기로 창 조절",null,(_,_)=>OriginalWindowSize());m.Items.Add("항상 위",null,(_,_)=>TopMost=!TopMost);m.Items.Add("전체화면",null,(_,_)=>Fullscreen());m.Items.Add("파일 정보",null,(_,_)=>ToggleSide("info"));m.Items.Add(new ToolStripSeparator());m.Items.Add("영상 기본 앱 설정",null,(_,_)=>Safe(WindowsIntegration.OpenDefaultApps));m.Items.Add("업데이트 확인",null,(_,_)=>_=CheckForUpdates(true));m.Items.Add(new ToolStripSeparator());m.Items.Add("앱 종료",null,(_,_)=>Close());m.Show(Cursor.Position);}
-    async Task CheckForUpdates(bool manual)
-    {
-        if(checkingUpdate||closing||exportBusy)return;
-        checkingUpdate=true;
-        try
-        {
-            if (manual || current == null) status.Text = "업데이트를 확인하는 중…";
-            if (!manual && current == null) title.Text = "업데이트를 확인하는 중…";
-            var available=await Updates.CheckAsync();
-            if(closing||exportBusy)return;
-            prefs.LastUpdateCheckUtc=DateTime.UtcNow;
-            if(available==null){if(manual)MessageBox.Show(this,"최신 버전입니다.","MooVideo",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
-            status.Text=$"MooVideo {available.Version.ToString(3)} 업데이트 가능";
-            if(MessageBox.Show(this,$"새 버전 MooVideo {available.Version.ToString(3)}이 있습니다.\n지금 업데이트하시겠습니까?\n\n설치가 끝나면 앱을 다시 시작합니다.","MooVideo 업데이트",MessageBoxButtons.YesNo,MessageBoxIcon.Information)!=DialogResult.Yes){status.Text="업데이트를 나중에 설치합니다.";return;}
-            updateToken=new();var progress=new Progress<double>(fraction=>{if(!closing){status.Text=$"업데이트 다운로드 {(int)(fraction*100)}%";if(!manual)title.Text=status.Text;}});
-            SetUpdatingDisplay(true);Enabled=false;
-            await Updates.DownloadAndStartAsync(available,progress,updateToken.Token,current??initialArgs.FirstOrDefault(File.Exists));
-            status.Text="업데이트를 적용하기 위해 다시 시작합니다.";Close();
-        }
-        catch(OperationCanceledException){}
-        catch(Exception ex){if(!closing)Error(new Exception("업데이트를 확인하거나 설치하지 못했습니다.\n"+ex.Message+"\n\n영상 우클릭 → 업데이트 확인에서 다시 시도할 수 있습니다."));}
-        finally{if(!closing){SetUpdatingDisplay(false);Enabled=true;if(!manual)title.Text=current==null?"MooVideo":Path.GetFileName(current)+" · MooVideo";}checkingUpdate=false;updateToken?.Dispose();updateToken=null;}
-    }
     void SetUpdatingDisplay(bool updating){video.Updating=updating;startupDefaults.Visible=video.Empty&&!playbackStarted&&!updating;video.Invalidate();}
     void OnKey(object? s,KeyEventArgs e)
     {
@@ -308,7 +286,7 @@ public sealed partial class PlayerForm:Form,IMessageFilter
     void OnClosing(object? sender,FormClosingEventArgs e)
     {
         if(exportBusy){MessageBox.Show(this,"작업을 취소하거나 완료한 뒤 닫아 주세요.","MooVideo");e.Cancel=true;return;}
-        closing=true;Remember();prefs.Save();timer.Stop();wheelTimer.Stop();probeToken?.Cancel();updateToken?.Cancel();libraryToken?.Cancel();keyToken?.Cancel();Application.RemoveMessageFilter(this);player?.Dispose();player=null;
+        closing=true;Remember();prefs.Save();timer.Stop();wheelTimer.Stop();probeToken?.Cancel();CancelUpdate();libraryToken?.Cancel();keyToken?.Cancel();Application.RemoveMessageFilter(this);player?.Dispose();player=null;
         timer.Dispose();wheelTimer.Dispose();tips.Dispose();
     }
 }
