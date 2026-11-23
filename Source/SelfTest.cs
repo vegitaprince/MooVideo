@@ -275,6 +275,21 @@ public sealed partial class PlayerForm
         TopMost = true;
         Activate();
         await Task.Delay(200);
+        using (var menu = CreateInkWidthMenu())
+        {
+            menu.Show(inkWidthButton!, new Point(0, inkWidthButton!.Height));
+            await Task.Delay(150);
+            using var capture = new Bitmap(menu.Width, menu.Height);
+            using (var g = Graphics.FromImage(capture)) g.CopyFromScreen(menu.PointToScreen(Point.Empty), Point.Empty, capture.Size);
+            foreach (ToolStripMenuItem item in menu.Items)
+            {
+                var background = capture.GetPixel(7, item.Bounds.Top + 4);
+                var center = item.Bounds.Top + item.Height / 2;
+                bool visibleSample = Enumerable.Range(10, 22).Any(x => capture.GetPixel(x, center).GetBrightness() > .8f);
+                check(background.GetBrightness() < .25f && visibleSample, $"dark ink width swatch with visible white line ({item.Text})");
+            }
+            menu.Close();
+        }
         var samplePoint = new PointF(.40f, .46f);
         var original = ScreenPixel(samplePoint);
         Drag(new PointF(.2f, .46f), new PointF(.65f, .46f));

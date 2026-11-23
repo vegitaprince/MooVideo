@@ -460,10 +460,29 @@ public sealed partial class PlayerForm
         g.DrawLine(p, bounds.Left + 8, bounds.Height / 2f, bounds.Right - 8, bounds.Height / 2f);
     }
 
-    void ShowInkWidths()
+    sealed class InkWidthMenuColors : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground => Color.Black;
+        public override Color ImageMarginGradientBegin => Color.Black;
+        public override Color ImageMarginGradientMiddle => Color.Black;
+        public override Color ImageMarginGradientEnd => Color.Black;
+        public override Color CheckBackground => Color.Black;
+        public override Color CheckSelectedBackground => Color.Black;
+        public override Color CheckPressedBackground => Color.Black;
+        public override Color ButtonSelectedBorder => Theme.Muted;
+        public override Color MenuBorder => Theme.Line;
+        public override Color MenuItemSelected => Color.Black;
+        public override Color MenuItemBorder => Theme.Muted;
+    }
+
+    void ShowInkWidths() => CreateInkWidthMenu().Show(inkWidthButton!, new Point(0, inkWidthButton!.Height));
+
+    ContextMenuStrip CreateInkWidthMenu()
     {
         var menu = Menu();
         var samples = new List<Bitmap>();
+        menu.BackColor = Color.Black;
+        menu.Renderer = new ToolStripProfessionalRenderer(new InkWidthMenuColors()) { RoundedEdges = false };
         menu.ShowImageMargin = true;
         menu.ImageScalingSize = new Size(34, 22);
         for (int level = 0; level < DrawingSizeLabels.Length; level++)
@@ -474,6 +493,7 @@ public sealed partial class PlayerForm
             using (var g = Graphics.FromImage(sample)) DrawWidthSample(g, new Rectangle(0, 0, sample.Width, sample.Height), level);
             var item = new ToolStripMenuItem(DrawingSizeLabels[level], sample)
             {
+                ForeColor = Theme.Text,
                 ImageScaling = ToolStripItemImageScaling.None,
                 Checked = (inkCanvas.Erasing ? inkCanvas.EraserSize : inkCanvas.PenSize) == level
             };
@@ -481,7 +501,7 @@ public sealed partial class PlayerForm
             menu.Items.Add(item);
         }
         menu.Disposed += (_, _) => { foreach (var sample in samples) sample.Dispose(); };
-        menu.Show(inkWidthButton!, new Point(0, inkWidthButton!.Height));
+        return menu;
     }
 
     void SetInkWidth(int level)
