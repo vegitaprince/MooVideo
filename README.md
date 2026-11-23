@@ -1,10 +1,14 @@
-# MooVideo 0.6.3
+# MooVideo 0.6.4
 
 MooView 이미지 뷰어의 간결한 버튼과 하단 조작부를 바탕으로 만든 Windows 동영상 뷰어입니다.
 
-[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.3/MooVideo-0.6.3-win-x64.zip)
+[Windows x64 포터블 ZIP 다운로드](https://github.com/vegitaprince/MooVideo/releases/download/v0.6.4/MooVideo-0.6.4-win-x64.zip)
 
 ZIP 전체를 풀고 `App/MooVideo.exe`를 실행하세요.
+
+## 0.6.4 변경 사항
+
+- 업데이트 설치 팝업이 플레이어가 있는 모니터의 정중앙에 표시됩니다.
 
 ## 0.6.3 변경 사항
 

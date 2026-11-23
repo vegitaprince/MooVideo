@@ -242,11 +242,17 @@ public sealed partial class PlayerForm
         await Task.Delay(100);
         check(preparedUpdate != null && updatePrompt == null && !video.Updating, "ready update waits for an active export");
         var focusedWindow = Native.GetForegroundWindow();
+        var screen = Screen.FromControl(this).Bounds;
+        Location = new Point(screen.Left + 24, screen.Top + 24);
         exportBusy = false;
         await Task.Delay(250);
         check(updatePrompt is { Visible: true } && Enabled && !closing && Native.IsWindowEnabled(Handle),
             "installation prompt appears after preparation without disabling the player");
         check(Native.GetForegroundWindow() == focusedWindow, "installation prompt does not take focus");
+        var promptBounds = updatePrompt!.Bounds;
+        check(Math.Abs(promptBounds.Left + promptBounds.Right - screen.Left - screen.Right) <= 1 &&
+            Math.Abs(promptBounds.Top + promptBounds.Bottom - screen.Top - screen.Bottom) <= 1,
+            "installation prompt centers on the display while the player is off center");
         OnKey(this, new KeyEventArgs(Keys.Space));
         await Task.Delay(100);
         check(!media.Flag("pause"), "playback controls work while installation is offered");

@@ -90,10 +90,11 @@ public sealed partial class PlayerForm
         if (!offerUpdate || preparedUpdate == null || closing || exportBusy || WindowState == FormWindowState.Minimized || !Native.IsWindowEnabled(Handle)) return;
 
         offerUpdate = false;
+        var screen = Screen.FromControl(this).Bounds;
         var prompt = new UpdatePrompt
         {
             Text = "MooVideo 업데이트", ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
-            FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.Manual, Location = screen.Location,
             AutoScaleMode = AutoScaleMode.Font, Font = Font, BackColor = Theme.Panel, ForeColor = Theme.Text,
             ClientSize = new Size(384, 158)
         };
@@ -124,6 +125,9 @@ public sealed partial class PlayerForm
         updatePrompt = prompt;
         updateInstallButton = install;
         updatePromptMessage = message;
+        prompt.Load += (_, _) => prompt.Location = new Point(
+            screen.Left + (screen.Width - prompt.Width) / 2,
+            screen.Top + (screen.Height - prompt.Height) / 2);
         prompt.Show(this);
     }
 
